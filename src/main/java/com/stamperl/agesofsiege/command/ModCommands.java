@@ -23,6 +23,10 @@ public final class ModCommands {
 				.executes(context -> showStatus(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("setbase")
 				.executes(context -> setBaseAtPlayer(context.getSource().getPlayerOrThrow())))
+			.then(CommandManager.literal("startsiege")
+				.executes(context -> startSiege(context.getSource().getPlayerOrThrow())))
+			.then(CommandManager.literal("endsiege")
+				.executes(context -> endSiege(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("clearbase")
 				.executes(context -> clearBase(context.getSource().getPlayerOrThrow()))));
 	}
@@ -47,6 +51,27 @@ public final class ModCommands {
 			player.getGameProfile().getName()
 		);
 		player.sendMessage(Text.literal("Siege base set at your current position.").formatted(Formatting.GREEN), false);
+		return 1;
+	}
+
+	private static int startSiege(ServerPlayerEntity player) {
+		SiegeBaseState state = SiegeBaseState.get(player.getServer());
+		if (!state.hasBase()) {
+			player.sendMessage(Text.literal("Place a Settlement Standard before starting a siege.")
+				.formatted(Formatting.YELLOW), false);
+			return 0;
+		}
+
+		state.startSiege(player.getServer());
+		player.sendMessage(Text.literal("Test siege started. If the Settlement Standard is destroyed, the siege fails.")
+			.formatted(Formatting.GOLD), false);
+		return 1;
+	}
+
+	private static int endSiege(ServerPlayerEntity player) {
+		SiegeBaseState state = SiegeBaseState.get(player.getServer());
+		state.endSiege(false);
+		player.sendMessage(Text.literal("Active siege cleared.").formatted(Formatting.GREEN), false);
 		return 1;
 	}
 

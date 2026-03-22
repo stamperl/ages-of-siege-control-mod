@@ -1,6 +1,3 @@
 {
-  "parent": "minecraft:item/generated",
-  "textures": {
-    "layer0": "minecraft:item/compass"
-  }
+  "parent": "ages_of_siege:block/settlement_standard"
 }
