@@ -44,6 +44,8 @@ public class SiegeBaseState extends PersistentState {
 	private boolean assaultModePrimed;
 	private int rushTicks;
 	private int breachedWallBlocks;
+	private BlockPos assaultOrigin;
+	private BlockPos primaryBreachTarget;
 	private int countdownTicks;
 	private int lastWaveSize;
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
@@ -72,6 +74,20 @@ public class SiegeBaseState extends PersistentState {
 		state.assaultModePrimed = nbt.getBoolean("assaultModePrimed");
 		state.rushTicks = nbt.getInt("rushTicks");
 		state.breachedWallBlocks = nbt.getInt("breachedWallBlocks");
+		if (nbt.contains("assaultOriginX")) {
+			state.assaultOrigin = new BlockPos(
+				nbt.getInt("assaultOriginX"),
+				nbt.getInt("assaultOriginY"),
+				nbt.getInt("assaultOriginZ")
+			);
+		}
+		if (nbt.contains("primaryBreachTargetX")) {
+			state.primaryBreachTarget = new BlockPos(
+				nbt.getInt("primaryBreachTargetX"),
+				nbt.getInt("primaryBreachTargetY"),
+				nbt.getInt("primaryBreachTargetZ")
+			);
+		}
 		state.countdownTicks = nbt.getInt("countdownTicks");
 		state.lastWaveSize = nbt.getInt("lastWaveSize");
 		state.objectiveHealth = nbt.contains("objectiveHealth") ? nbt.getInt("objectiveHealth") : MAX_OBJECTIVE_HEALTH;
@@ -102,6 +118,8 @@ public class SiegeBaseState extends PersistentState {
 		this.assaultModePrimed = false;
 		this.rushTicks = 0;
 		this.breachedWallBlocks = 0;
+		this.assaultOrigin = null;
+		this.primaryBreachTarget = null;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		markDirty();
 	}
@@ -118,6 +136,8 @@ public class SiegeBaseState extends PersistentState {
 		this.assaultModePrimed = false;
 		this.rushTicks = 0;
 		this.breachedWallBlocks = 0;
+		this.assaultOrigin = null;
+		this.primaryBreachTarget = null;
 		this.countdownTicks = 0;
 		this.lastWaveSize = 0;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
@@ -183,6 +203,38 @@ public class SiegeBaseState extends PersistentState {
 		return breachedWallBlocks;
 	}
 
+	public BlockPos getAssaultOrigin() {
+		return assaultOrigin;
+	}
+
+	public void setAssaultOrigin(BlockPos assaultOrigin) {
+		BlockPos next = assaultOrigin == null ? null : assaultOrigin.toImmutable();
+		if (this.assaultOrigin != null && this.assaultOrigin.equals(next)) {
+			return;
+		}
+		if (this.assaultOrigin == null && next == null) {
+			return;
+		}
+		this.assaultOrigin = next;
+		markDirty();
+	}
+
+	public BlockPos getPrimaryBreachTarget() {
+		return primaryBreachTarget;
+	}
+
+	public void setPrimaryBreachTarget(BlockPos primaryBreachTarget) {
+		BlockPos next = primaryBreachTarget == null ? null : primaryBreachTarget.toImmutable();
+		if (this.primaryBreachTarget != null && this.primaryBreachTarget.equals(next)) {
+			return;
+		}
+		if (this.primaryBreachTarget == null && next == null) {
+			return;
+		}
+		this.primaryBreachTarget = next;
+		markDirty();
+	}
+
 	public int getObjectiveHealth() {
 		return objectiveHealth;
 	}
@@ -208,6 +260,8 @@ public class SiegeBaseState extends PersistentState {
 		this.assaultModePrimed = false;
 		this.rushTicks = 0;
 		this.breachedWallBlocks = 0;
+		this.assaultOrigin = null;
+		this.primaryBreachTarget = null;
 		markDirty();
 	}
 
@@ -261,6 +315,8 @@ public class SiegeBaseState extends PersistentState {
 		this.assaultModePrimed = false;
 		this.rushTicks = 0;
 		this.breachedWallBlocks = 0;
+		this.assaultOrigin = null;
+		this.primaryBreachTarget = null;
 		this.countdownTicks = countdownSeconds * 20;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.attackerIds.clear();
@@ -283,7 +339,7 @@ public class SiegeBaseState extends PersistentState {
 		return countdownTicks;
 	}
 
-	public void startSiege(MinecraftServer server, List<UUID> attackerIds, List<UUID> ramIds, int waveSize) {
+	public void startSiege(MinecraftServer server, List<UUID> attackerIds, List<UUID> ramIds, int waveSize, BlockPos assaultOrigin) {
 		this.siegePending = false;
 		this.siegeActive = true;
 		this.siegeFailed = false;
@@ -291,6 +347,8 @@ public class SiegeBaseState extends PersistentState {
 		this.assaultModePrimed = false;
 		this.rushTicks = 0;
 		this.breachedWallBlocks = 0;
+		this.assaultOrigin = assaultOrigin == null ? null : assaultOrigin.toImmutable();
+		this.primaryBreachTarget = null;
 		this.countdownTicks = 0;
 		this.lastWaveSize = waveSize;
 		this.attackerIds.clear();
@@ -310,6 +368,8 @@ public class SiegeBaseState extends PersistentState {
 		this.assaultModePrimed = false;
 		this.rushTicks = 0;
 		this.breachedWallBlocks = 0;
+		this.assaultOrigin = null;
+		this.primaryBreachTarget = null;
 		this.countdownTicks = 0;
 		if (rewardProgress && !failed) {
 			this.completedSieges++;
@@ -427,6 +487,16 @@ public class SiegeBaseState extends PersistentState {
 		nbt.putBoolean("assaultModePrimed", assaultModePrimed);
 		nbt.putInt("rushTicks", rushTicks);
 		nbt.putInt("breachedWallBlocks", breachedWallBlocks);
+		if (assaultOrigin != null) {
+			nbt.putInt("assaultOriginX", assaultOrigin.getX());
+			nbt.putInt("assaultOriginY", assaultOrigin.getY());
+			nbt.putInt("assaultOriginZ", assaultOrigin.getZ());
+		}
+		if (primaryBreachTarget != null) {
+			nbt.putInt("primaryBreachTargetX", primaryBreachTarget.getX());
+			nbt.putInt("primaryBreachTargetY", primaryBreachTarget.getY());
+			nbt.putInt("primaryBreachTargetZ", primaryBreachTarget.getZ());
+		}
 		nbt.putInt("countdownTicks", countdownTicks);
 		nbt.putInt("lastWaveSize", lastWaveSize);
 		nbt.putInt("objectiveHealth", objectiveHealth);

@@ -291,7 +291,7 @@ public final class SiegeManager {
 			return;
 		}
 
-		state.startSiege(server, spawnedAttackers, spawnedRams, waveSize);
+		state.startSiege(server, spawnedAttackers, spawnedRams, waveSize, BlockPos.ofFloored(formation.center()));
 		sendAgeProgressMessage(server, state);
 	}
 
@@ -566,14 +566,16 @@ public final class SiegeManager {
 			return;
 		}
 
-		BlockPos breachTarget = decision.primaryBreachTarget() != null
+		BlockPos breachAnchor = decision.primaryBreachTarget() != null
 			? decision.primaryBreachTarget()
-			: findBestBreachTarget(world, hostile.getPos(), objectivePos);
+			: findBestRamBreachTarget(world, hostile.getPos(), objectivePos);
+		BlockPos breachTarget = getAssignedBreachFaceTarget(world, breachAnchor, hostile, objectivePos);
 		if (DEBUG_LOGGING && world.getTime() % 40L == 0L) {
 			AgesOfSiegeMod.LOGGER.info(
-				"[SiegeDebug] breacher={} mode={} breachTarget={} pos={}",
+				"[SiegeDebug] breacher={} mode={} breachAnchor={} breachTarget={} pos={}",
 				hostile.getType().getUntranslatedName(),
 				assaultMode,
+				breachAnchor,
 				breachTarget,
 				hostile.getBlockPos()
 			);
@@ -662,24 +664,119 @@ public final class SiegeManager {
 		HostileEntity furthestBreacher = getFurthestBreacher(world, state, objectiveCenter);
 		SiegeRamEntity furthestRam = getFurthestRam(world, state, objectiveCenter);
 		HostileEntity furthestAttacker = getFurthestAttacker(world, state, objectiveCenter);
+		Vec3d pathSource = state.getAssaultOrigin() != null ? Vec3d.ofCenter(state.getAssaultOrigin()) : null;
 		Entity pathLead = furthestBreacher != null ? furthestBreacher : (furthestAttacker != null ? furthestAttacker : furthestRam);
 		boolean breachTeamAlive = hasActiveBreachTeam(world, state);
 		if (pathLead == null) {
 			return new AssaultDecision(AssaultMode.RUSH_BANNER, null, null, true, furthestRam != null, breachTeamAlive);
 		}
+		if (pathSource == null) {
+			pathSource = pathLead.getPos();
+		}
 
-		InfantryPathResult pathResult = findInfantryPath(world, pathLead.getPos(), objectiveCenter, ASSAULT_LANE_CHECK_DISTANCE, 2);
-		BlockPos primaryBreachTarget = furthestRam != null
-			? getEffectiveRamTarget(world, furthestRam, objectivePos)
-			: findBestBreachTarget(world, pathLead.getPos(), objectivePos);
+		BlockPos primaryBreachTarget = getStablePrimaryBreachTarget(world, state, objectivePos, furthestRam, pathSource);
+		Vec3d reachabilitySource = primaryBreachTarget != null && WallTier.from(world.getBlockState(primaryBreachTarget)) == WallTier.NONE
+			? Vec3d.ofCenter(primaryBreachTarget)
+			: pathSource;
+		InfantryPathResult pathResult = findInfantryPath(world, reachabilitySource, objectiveCenter, ASSAULT_LANE_CHECK_DISTANCE, 2);
 		if (pathResult.reachable()) {
-			logAssaultDecision(world, pathLead, pathResult, furthestRam != null, primaryBreachTarget, AssaultMode.RUSH_BANNER);
+			state.setPrimaryBreachTarget(null);
+		}
+		if (pathResult.reachable()) {
+			logAssaultDecision(world, pathLead, reachabilitySource, pathResult, furthestRam != null, primaryBreachTarget, AssaultMode.RUSH_BANNER);
 			return new AssaultDecision(AssaultMode.RUSH_BANNER, pathLead.getUuid(), primaryBreachTarget, true, furthestRam != null, breachTeamAlive);
+		}
+		if (primaryBreachTarget != null) {
+			state.setPrimaryBreachTarget(primaryBreachTarget);
 		}
 
 		AssaultMode blockedMode = furthestRam != null ? AssaultMode.SUPPORT_RAM : AssaultMode.INFANTRY_BREACH;
-		logAssaultDecision(world, pathLead, pathResult, furthestRam != null, primaryBreachTarget, blockedMode);
+		logAssaultDecision(world, pathLead, reachabilitySource, pathResult, furthestRam != null, primaryBreachTarget, blockedMode);
 		return new AssaultDecision(blockedMode, pathLead.getUuid(), primaryBreachTarget, false, furthestRam != null, breachTeamAlive);
+	}
+
+	private static BlockPos getStablePrimaryBreachTarget(ServerWorld world, SiegeBaseState state, BlockPos objectivePos, SiegeRamEntity furthestRam, Vec3d pathSource) {
+		BlockPos current = state.getPrimaryBreachTarget();
+		if (current != null) {
+			BlockPos anchorBase = getWallBase(current, world);
+			if (isBreachZoneActive(world, anchorBase, objectivePos)) {
+				return anchorBase;
+			}
+		}
+		BlockPos next = furthestRam != null
+			? getEffectiveRamTarget(world, furthestRam, objectivePos)
+			: findBestRamBreachTarget(world, pathSource, objectivePos);
+		state.setPrimaryBreachTarget(next);
+		return next;
+	}
+
+	private static BlockPos getAssignedBreachFaceTarget(ServerWorld world, BlockPos breachAnchor, HostileEntity hostile, BlockPos objectivePos) {
+		if (breachAnchor == null) {
+			return null;
+		}
+
+		Vec3d[] axes = getBreachAxes(breachAnchor, objectivePos);
+		Vec3d forward = axes[0];
+		Vec3d right = axes[1];
+		int slot = Math.floorMod(hostile.getUuid().hashCode(), 3) - 1;
+		int baseHeight = getRamWallHeight(world, breachAnchor);
+		int[] lateralPriority = slot == 0 ? new int[] {0, -1, 1, -2, 2} : new int[] {slot, 0, -slot, slot * 2, -slot * 2};
+
+		for (int depth = 0; depth <= 2; depth++) {
+			for (int lateral : lateralPriority) {
+				BlockPos lateralBase = breachAnchor.add(
+					MathHelper.floor(right.x * lateral + forward.x * depth),
+					0,
+					MathHelper.floor(right.z * lateral + forward.z * depth)
+				);
+				for (int yOffset = 0; yOffset <= Math.max(2, baseHeight); yOffset++) {
+					BlockPos candidate = lateralBase.up(yOffset);
+					if (WallTier.from(world.getBlockState(candidate)) != WallTier.NONE) {
+						return candidate.toImmutable();
+					}
+				}
+			}
+		}
+
+		return findNearestWallAroundAnchor(world, breachAnchor, objectivePos);
+	}
+
+	private static boolean isBreachZoneActive(ServerWorld world, BlockPos anchorBase, BlockPos objectivePos) {
+		return findNearestWallAroundAnchor(world, anchorBase, objectivePos) != null;
+	}
+
+	private static BlockPos findNearestWallAroundAnchor(ServerWorld world, BlockPos breachAnchor, BlockPos objectivePos) {
+		Vec3d[] axes = getBreachAxes(breachAnchor, objectivePos);
+		Vec3d forward = axes[0];
+		Vec3d right = axes[1];
+		for (int depth = 0; depth <= 3; depth++) {
+			for (int lateral = -2; lateral <= 2; lateral++) {
+				BlockPos base = breachAnchor.add(
+					MathHelper.floor(right.x * lateral + forward.x * depth),
+					0,
+					MathHelper.floor(right.z * lateral + forward.z * depth)
+				);
+				for (int y = 0; y <= 2; y++) {
+					BlockPos candidate = base.up(y);
+					if (WallTier.from(world.getBlockState(candidate)) != WallTier.NONE) {
+						return candidate.toImmutable();
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	private static Vec3d[] getBreachAxes(BlockPos breachAnchor, BlockPos objectivePos) {
+		Vec3d objectiveCenter = Vec3d.ofCenter(objectivePos);
+		Vec3d anchorCenter = Vec3d.ofCenter(breachAnchor);
+		Vec3d forward = new Vec3d(objectiveCenter.x - anchorCenter.x, 0.0D, objectiveCenter.z - anchorCenter.z);
+		if (forward.lengthSquared() < 0.001D) {
+			forward = new Vec3d(1.0D, 0.0D, 0.0D);
+		}
+		forward = forward.normalize();
+		Vec3d right = new Vec3d(-forward.z, 0.0D, forward.x);
+		return new Vec3d[] {forward, right};
 	}
 
 	private static AssaultMode getDefaultAssaultMode(SiegeBaseState state) {
@@ -1269,13 +1366,14 @@ public final class SiegeManager {
 		return true;
 	}
 
-	private static void logAssaultDecision(ServerWorld world, Entity pathLead, InfantryPathResult pathResult, boolean hasRam, BlockPos primaryBreachTarget, AssaultMode mode) {
+	private static void logAssaultDecision(ServerWorld world, Entity pathLead, Vec3d pathSource, InfantryPathResult pathResult, boolean hasRam, BlockPos primaryBreachTarget, AssaultMode mode) {
 		if (!DEBUG_LOGGING || world.getTime() % 20L != 0L) {
 			return;
 		}
 		AgesOfSiegeMod.LOGGER.info(
-			"[SiegeDebug] decision lead={} hasRam={} reachable={} explored={} start={} breachTarget={} -> {}",
+			"[SiegeDebug] decision lead={} source={} hasRam={} reachable={} explored={} start={} breachTarget={} -> {}",
 			pathLead.getType().getUntranslatedName(),
+			BlockPos.ofFloored(pathSource),
 			hasRam,
 			pathResult.reachable(),
 			pathResult.explored(),
