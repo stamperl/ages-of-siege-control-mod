@@ -17,4 +17,5 @@ if not exist "%TARGET%" (
 )
 
 copy /Y "%SOURCE%" "%TARGET%\ages-of-siege-control-0.1.0.jar" >nul
+powershell -NoProfile -Command "(Get-Item '%TARGET%\ages-of-siege-control-0.1.0.jar').LastWriteTime = Get-Date" >nul
 echo Installed Ages Of Siege Control Mod into Prism.

@@ -16,6 +16,9 @@
   "entrypoints": {
     "main": [
       "com.stamperl.agesofsiege.AgesOfSiegeMod"
+    ],
+    "client": [
+      "com.stamperl.agesofsiege.AgesOfSiegeClient"
     ]
   },
   "depends": {

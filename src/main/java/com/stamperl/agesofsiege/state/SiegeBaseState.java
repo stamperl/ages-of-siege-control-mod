@@ -1,5 +1,6 @@
 package com.stamperl.agesofsiege.state;
 
+import com.stamperl.agesofsiege.siege.SiegeManager;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtList;
@@ -38,10 +39,12 @@ public class SiegeBaseState extends PersistentState {
 	private boolean siegeActive;
 	private boolean siegePending;
 	private boolean siegeFailed;
+	private boolean breachOpen;
 	private int countdownTicks;
 	private int lastWaveSize;
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
 	private final List<UUID> attackerIds = new ArrayList<>();
+	private final List<UUID> ramIds = new ArrayList<>();
 	private final Map<Long, Integer> wallHealth = new HashMap<>();
 
 	public static SiegeBaseState get(MinecraftServer server) {
@@ -61,12 +64,17 @@ public class SiegeBaseState extends PersistentState {
 		state.siegeActive = nbt.getBoolean("siegeActive");
 		state.siegePending = nbt.getBoolean("siegePending");
 		state.siegeFailed = nbt.getBoolean("siegeFailed");
+		state.breachOpen = nbt.getBoolean("breachOpen");
 		state.countdownTicks = nbt.getInt("countdownTicks");
 		state.lastWaveSize = nbt.getInt("lastWaveSize");
 		state.objectiveHealth = nbt.contains("objectiveHealth") ? nbt.getInt("objectiveHealth") : MAX_OBJECTIVE_HEALTH;
 		NbtList attackerList = nbt.getList("attackers", NbtElement.STRING_TYPE);
 		for (NbtElement element : attackerList) {
 			state.attackerIds.add(UUID.fromString(element.asString()));
+		}
+		NbtList ramList = nbt.getList("rams", NbtElement.STRING_TYPE);
+		for (NbtElement element : ramList) {
+			state.ramIds.add(UUID.fromString(element.asString()));
 		}
 		NbtList wallList = nbt.getList("wallHealth", NbtElement.COMPOUND_TYPE);
 		for (NbtElement element : wallList) {
@@ -83,6 +91,7 @@ public class SiegeBaseState extends PersistentState {
 		this.claimedBy = claimedBy;
 		this.ageLevel = Math.max(this.ageLevel, 0);
 		this.siegeFailed = false;
+		this.breachOpen = false;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		markDirty();
 	}
@@ -95,10 +104,12 @@ public class SiegeBaseState extends PersistentState {
 		this.siegePending = false;
 		this.siegeActive = false;
 		this.siegeFailed = false;
+		this.breachOpen = false;
 		this.countdownTicks = 0;
 		this.lastWaveSize = 0;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.attackerIds.clear();
+		this.ramIds.clear();
 		this.wallHealth.clear();
 		markDirty();
 	}
@@ -119,6 +130,18 @@ public class SiegeBaseState extends PersistentState {
 		return siegePending;
 	}
 
+	public boolean isBreachOpen() {
+		return breachOpen;
+	}
+
+	public void setBreachOpen(boolean breachOpen) {
+		if (this.breachOpen == breachOpen) {
+			return;
+		}
+		this.breachOpen = breachOpen;
+		markDirty();
+	}
+
 	public int getObjectiveHealth() {
 		return objectiveHealth;
 	}
@@ -133,6 +156,15 @@ public class SiegeBaseState extends PersistentState {
 
 	public int getCompletedSieges() {
 		return completedSieges;
+	}
+
+	public void setTestingAgeLevel(int ageLevel) {
+		int clampedAge = MathHelper.clamp(ageLevel, 0, AGE_THRESHOLDS.length - 1);
+		this.ageLevel = clampedAge;
+		this.completedSieges = AGE_THRESHOLDS[clampedAge];
+		this.siegeFailed = false;
+		this.breachOpen = false;
+		markDirty();
 	}
 
 	public String getAgeName() {
@@ -158,6 +190,16 @@ public class SiegeBaseState extends PersistentState {
 		markDirty();
 	}
 
+	public List<UUID> getRamIds() {
+		return List.copyOf(ramIds);
+	}
+
+	public void replaceRams(List<UUID> ramIds) {
+		this.ramIds.clear();
+		this.ramIds.addAll(ramIds);
+		markDirty();
+	}
+
 	public ServerWorld getBaseWorld(MinecraftServer server) {
 		Identifier id = Identifier.tryParse(dimensionId);
 		if (id == null) {
@@ -171,9 +213,11 @@ public class SiegeBaseState extends PersistentState {
 		this.siegePending = true;
 		this.siegeActive = false;
 		this.siegeFailed = false;
+		this.breachOpen = false;
 		this.countdownTicks = countdownSeconds * 20;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.attackerIds.clear();
+		this.ramIds.clear();
 		this.wallHealth.clear();
 		server.getPlayerManager().broadcast(
 			Text.literal("A siege is approaching. Defend the Settlement Standard."),
@@ -192,14 +236,17 @@ public class SiegeBaseState extends PersistentState {
 		return countdownTicks;
 	}
 
-	public void startSiege(MinecraftServer server, List<UUID> attackerIds, int waveSize) {
+	public void startSiege(MinecraftServer server, List<UUID> attackerIds, List<UUID> ramIds, int waveSize) {
 		this.siegePending = false;
 		this.siegeActive = true;
 		this.siegeFailed = false;
+		this.breachOpen = false;
 		this.countdownTicks = 0;
 		this.lastWaveSize = waveSize;
 		this.attackerIds.clear();
 		this.attackerIds.addAll(attackerIds);
+		this.ramIds.clear();
+		this.ramIds.addAll(ramIds);
 		this.wallHealth.clear();
 		server.getPlayerManager().broadcast(Text.literal("A siege has begun. Defend the Settlement Standard!"), false);
 		markDirty();
@@ -209,12 +256,14 @@ public class SiegeBaseState extends PersistentState {
 		this.siegePending = false;
 		this.siegeActive = false;
 		this.siegeFailed = failed;
+		this.breachOpen = false;
 		this.countdownTicks = 0;
 		if (rewardProgress && !failed) {
 			this.completedSieges++;
 			this.ageLevel = resolveAgeLevel(this.completedSieges);
 		}
 		this.attackerIds.clear();
+		this.ramIds.clear();
 		this.wallHealth.clear();
 		markDirty();
 	}
@@ -271,11 +320,7 @@ public class SiegeBaseState extends PersistentState {
 		}
 
 		if (siegeActive) {
-			endSiege(true, false);
-			world.getServer().getPlayerManager().broadcast(
-				Text.literal("The Settlement Standard was destroyed. The siege is lost."),
-				false
-			);
+			SiegeManager.failActiveSiege(world, this, "The Settlement Standard was destroyed. The siege is lost.");
 			return;
 		}
 
@@ -322,6 +367,7 @@ public class SiegeBaseState extends PersistentState {
 		nbt.putBoolean("siegePending", siegePending);
 		nbt.putBoolean("siegeActive", siegeActive);
 		nbt.putBoolean("siegeFailed", siegeFailed);
+		nbt.putBoolean("breachOpen", breachOpen);
 		nbt.putInt("countdownTicks", countdownTicks);
 		nbt.putInt("lastWaveSize", lastWaveSize);
 		nbt.putInt("objectiveHealth", objectiveHealth);
@@ -330,6 +376,11 @@ public class SiegeBaseState extends PersistentState {
 			attackerList.add(NbtString.of(attackerId.toString()));
 		}
 		nbt.put("attackers", attackerList);
+		NbtList ramList = new NbtList();
+		for (UUID ramId : ramIds) {
+			ramList.add(NbtString.of(ramId.toString()));
+		}
+		nbt.put("rams", ramList);
 		NbtList wallList = new NbtList();
 		for (Map.Entry<Long, Integer> entry : wallHealth.entrySet()) {
 			NbtCompound wallEntry = new NbtCompound();

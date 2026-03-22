@@ -1,6 +1,7 @@
 package com.stamperl.agesofsiege;
 
 import com.stamperl.agesofsiege.command.ModCommands;
+import com.stamperl.agesofsiege.entity.ModEntities;
 import com.stamperl.agesofsiege.item.ModItems;
 import com.stamperl.agesofsiege.siege.SiegeManager;
 import net.fabricmc.api.ModInitializer;
@@ -13,6 +14,7 @@ public class AgesOfSiegeMod implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		ModEntities.register();
 		ModItems.register();
 		ModCommands.register();
 		SiegeManager.register();
