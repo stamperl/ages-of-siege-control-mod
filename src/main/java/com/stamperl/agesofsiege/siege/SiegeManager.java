@@ -28,8 +28,11 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public final class SiegeManager {
@@ -48,6 +51,7 @@ public final class SiegeManager {
 	private static final double BREACHER_GUARD_DEPTH = 2.0D;
 	private static final double MAX_BREACH_SCAN_DEPTH = 96.0D;
 	private static final double ASSAULT_LANE_CHECK_DISTANCE = 250.0D;
+	private static final int INFANTRY_PATH_SEARCH_LIMIT = 4096;
 	private static final double LANE_CHECK_INITIAL_SKIP = 6.0D;
 	private static final double[] BREACH_LANES = {-6.0D, -3.0D, 0.0D, 3.0D, 6.0D};
 	private static final double[] LANE_WIDTH_SAMPLES = {-2.0D, -1.0D, 0.0D, 1.0D, 2.0D};
@@ -633,7 +637,7 @@ public final class SiegeManager {
 			if (furthestAttacker != null) {
 				boolean openLane = hasClearInfantryAssaultLane(world, furthestAttacker.getPos(), objectiveCenter);
 				BlockPos breachTarget = findBestBreachTarget(world, furthestAttacker.getPos(), objectivePos);
-				boolean canRush = openLane && (breachTarget == null || state.getBreachedWallBlocks() > 0);
+				boolean canRush = openLane;
 				if (canRush) {
 					if (DEBUG_LOGGING && world.getTime() % 20L == 0L) {
 						AgesOfSiegeMod.LOGGER.info(
@@ -665,7 +669,7 @@ public final class SiegeManager {
 		SiegeRamEntity furthestRam = getFurthestRam(world, state, objectiveCenter);
 		if (furthestRam != null) {
 			BlockPos ramTarget = findBestBreachTarget(world, furthestRam.getPos(), objectivePos);
-			if (ramTarget != null && !(breacherOpenLane && state.getBreachedWallBlocks() > 0)) {
+			if (ramTarget != null && !breacherOpenLane) {
 				return AssaultMode.SUPPORT_RAM;
 			}
 			return hasClearInfantryAssaultLane(world, furthestRam.getPos(), objectiveCenter)
@@ -675,7 +679,7 @@ public final class SiegeManager {
 
 		if (furthestBreacher != null) {
 			BlockPos breachTarget = findBestBreachTarget(world, furthestBreacher.getPos(), objectivePos);
-			if (breachTarget != null && !(breacherOpenLane && state.getBreachedWallBlocks() > 0)) {
+			if (breachTarget != null && !breacherOpenLane) {
 				return AssaultMode.INFANTRY_BREACH;
 			}
 			return breacherOpenLane
@@ -1302,29 +1306,76 @@ public final class SiegeManager {
 			return true;
 		}
 
-		Vec3d forward = delta.normalize();
-		Vec3d right = new Vec3d(-forward.z, 0.0D, forward.x);
 		double distance = Math.min(Math.sqrt(delta.lengthSquared()), maxDistance);
-		double previousFootY = getGroundY(world, from.x, from.z);
-		for (double step = Math.max(2.0D, LANE_CHECK_INITIAL_SKIP); step <= distance; step += 2.0D) {
-			Vec3d centerSample = from.add(forward.multiply(step));
-			for (double lateral : widthSamples) {
-				Vec3d sample = centerSample.add(right.multiply(lateral));
-				double footY = getGroundY(world, sample.x, sample.z);
-				if (footY > previousFootY + 1.0D) {
-					return false;
-				}
-				BlockPos laneBase = BlockPos.ofFloored(sample.x, footY, sample.z);
-				for (int yOffset = 0; yOffset < clearanceHeight; yOffset++) {
-					BlockPos candidate = laneBase.up(yOffset);
-					if (isMovementObstacle(world, candidate)) {
-						return false;
-					}
-				}
+		if (distance < LANE_CHECK_INITIAL_SKIP) {
+			return true;
+		}
+
+		Vec3d direction = delta.normalize();
+		Vec3d bfsStart = from.add(direction.multiply(LANE_CHECK_INITIAL_SKIP));
+		BlockPos start = getInfantryFootPos(world, bfsStart.x, bfsStart.z);
+		if (!canOccupyInfantryCell(world, start, clearanceHeight)) {
+			return false;
+		}
+
+		ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+		Set<Long> visited = new HashSet<>();
+		queue.add(start);
+		visited.add(packXZ(start.getX(), start.getZ()));
+		int explored = 0;
+
+		while (!queue.isEmpty() && explored < INFANTRY_PATH_SEARCH_LIMIT) {
+			BlockPos current = queue.removeFirst();
+			explored++;
+			if (Vec3d.ofBottomCenter(current).squaredDistanceTo(to.x, current.getY(), to.z) <= OBJECTIVE_ATTACK_RANGE * OBJECTIVE_ATTACK_RANGE) {
+				return true;
 			}
-			previousFootY = getGroundY(world, centerSample.x, centerSample.z);
+
+			for (int[] offset : new int[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+				int nextX = current.getX() + offset[0];
+				int nextZ = current.getZ() + offset[1];
+				long packed = packXZ(nextX, nextZ);
+				if (!visited.add(packed)) {
+					continue;
+				}
+
+				BlockPos next = getInfantryFootPos(world, nextX + 0.5D, nextZ + 0.5D);
+				if (Math.abs(next.getY() - current.getY()) > 1) {
+					continue;
+				}
+				if (Vec3d.ofBottomCenter(next).squaredDistanceTo(from.x, next.getY(), from.z) > distance * distance) {
+					continue;
+				}
+				if (!canOccupyInfantryCell(world, next, clearanceHeight)) {
+					continue;
+				}
+				queue.addLast(next);
+			}
+		}
+
+		return false;
+	}
+
+	private static BlockPos getInfantryFootPos(ServerWorld world, double x, double z) {
+		double footY = getGroundY(world, x, z);
+		return BlockPos.ofFloored(x, footY, z);
+	}
+
+	private static boolean canOccupyInfantryCell(ServerWorld world, BlockPos footPos, int clearanceHeight) {
+		BlockPos support = footPos.down();
+		if (world.getBlockState(support).isAir() || WallTier.from(world.getBlockState(support)) != WallTier.NONE) {
+			return false;
+		}
+		for (int yOffset = 0; yOffset < clearanceHeight; yOffset++) {
+			if (isMovementObstacle(world, footPos.up(yOffset))) {
+				return false;
+			}
 		}
 		return true;
+	}
+
+	private static long packXZ(int x, int z) {
+		return (((long) x) << 32) ^ (z & 0xffffffffL);
 	}
 
 	private static boolean isMovementObstacle(ServerWorld world, BlockPos pos) {
