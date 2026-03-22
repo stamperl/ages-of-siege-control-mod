@@ -69,14 +69,14 @@ public final class ModCommands {
 			return 0;
 		}
 
-		player.sendMessage(Text.literal("Test siege started. If the Settlement Standard is destroyed, the siege fails.")
+		player.sendMessage(Text.literal("Siege countdown started. Hold the line when the attackers arrive.")
 			.formatted(Formatting.GOLD), false);
 		return 1;
 	}
 
 	private static int endSiege(ServerPlayerEntity player) {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
-		state.endSiege(false);
+		state.endSiege(false, false);
 		player.sendMessage(Text.literal("Active siege cleared.").formatted(Formatting.GREEN), false);
 		return 1;
 	}

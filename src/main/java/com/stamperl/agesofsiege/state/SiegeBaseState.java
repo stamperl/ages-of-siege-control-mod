@@ -25,8 +25,13 @@ public class SiegeBaseState extends PersistentState {
 	private BlockPos basePos = BlockPos.ORIGIN;
 	private String dimensionId = "minecraft:overworld";
 	private String claimedBy = "unknown";
+	private int ageLevel;
+	private int completedSieges;
 	private boolean siegeActive;
+	private boolean siegePending;
 	private boolean siegeFailed;
+	private int countdownTicks;
+	private int lastWaveSize;
 	private final List<UUID> attackerIds = new ArrayList<>();
 
 	public static SiegeBaseState get(MinecraftServer server) {
@@ -41,8 +46,13 @@ public class SiegeBaseState extends PersistentState {
 		state.basePos = new BlockPos(nbt.getInt("x"), nbt.getInt("y"), nbt.getInt("z"));
 		state.dimensionId = nbt.getString("dimension");
 		state.claimedBy = nbt.getString("claimedBy");
+		state.ageLevel = nbt.getInt("ageLevel");
+		state.completedSieges = nbt.getInt("completedSieges");
 		state.siegeActive = nbt.getBoolean("siegeActive");
+		state.siegePending = nbt.getBoolean("siegePending");
 		state.siegeFailed = nbt.getBoolean("siegeFailed");
+		state.countdownTicks = nbt.getInt("countdownTicks");
+		state.lastWaveSize = nbt.getInt("lastWaveSize");
 		NbtList attackerList = nbt.getList("attackers", NbtElement.STRING_TYPE);
 		for (NbtElement element : attackerList) {
 			state.attackerIds.add(UUID.fromString(element.asString()));
@@ -55,6 +65,7 @@ public class SiegeBaseState extends PersistentState {
 		this.basePos = pos.toImmutable();
 		this.dimensionId = dimensionId;
 		this.claimedBy = claimedBy;
+		this.ageLevel = Math.max(this.ageLevel, 0);
 		this.siegeFailed = false;
 		markDirty();
 	}
@@ -64,8 +75,11 @@ public class SiegeBaseState extends PersistentState {
 		this.basePos = BlockPos.ORIGIN;
 		this.dimensionId = "minecraft:overworld";
 		this.claimedBy = "unknown";
+		this.siegePending = false;
 		this.siegeActive = false;
 		this.siegeFailed = false;
+		this.countdownTicks = 0;
+		this.lastWaveSize = 0;
 		this.attackerIds.clear();
 		markDirty();
 	}
@@ -80,6 +94,10 @@ public class SiegeBaseState extends PersistentState {
 
 	public boolean isSiegeActive() {
 		return siegeActive;
+	}
+
+	public boolean isSiegePending() {
+		return siegePending;
 	}
 
 	public List<UUID> getAttackerIds() {
@@ -101,18 +119,50 @@ public class SiegeBaseState extends PersistentState {
 		return server.getWorld(RegistryKey.of(RegistryKeys.WORLD, id));
 	}
 
-	public void startSiege(MinecraftServer server, List<UUID> attackerIds) {
+	public void beginCountdown(MinecraftServer server, int countdownSeconds) {
+		this.siegePending = true;
+		this.siegeActive = false;
+		this.siegeFailed = false;
+		this.countdownTicks = countdownSeconds * 20;
+		this.attackerIds.clear();
+		server.getPlayerManager().broadcast(
+			Text.literal("A siege is approaching. Defend the Settlement Standard."),
+			false
+		);
+		markDirty();
+	}
+
+	public int tickCountdown() {
+		if (!siegePending || countdownTicks <= 0) {
+			return countdownTicks;
+		}
+
+		countdownTicks--;
+		markDirty();
+		return countdownTicks;
+	}
+
+	public void startSiege(MinecraftServer server, List<UUID> attackerIds, int waveSize) {
+		this.siegePending = false;
 		this.siegeActive = true;
 		this.siegeFailed = false;
+		this.countdownTicks = 0;
+		this.lastWaveSize = waveSize;
 		this.attackerIds.clear();
 		this.attackerIds.addAll(attackerIds);
 		server.getPlayerManager().broadcast(Text.literal("A siege has begun. Defend the Settlement Standard!"), false);
 		markDirty();
 	}
 
-	public void endSiege(boolean failed) {
+	public void endSiege(boolean failed, boolean rewardProgress) {
+		this.siegePending = false;
 		this.siegeActive = false;
 		this.siegeFailed = failed;
+		this.countdownTicks = 0;
+		if (rewardProgress && !failed) {
+			this.completedSieges++;
+			this.ageLevel = Math.max(this.ageLevel, 1);
+		}
 		this.attackerIds.clear();
 		markDirty();
 	}
@@ -123,7 +173,7 @@ public class SiegeBaseState extends PersistentState {
 		}
 
 		if (siegeActive) {
-			endSiege(true);
+			endSiege(true, false);
 			world.getServer().getPlayerManager().broadcast(
 				Text.literal("The Settlement Standard was destroyed. The siege is lost."),
 				false
@@ -140,12 +190,16 @@ public class SiegeBaseState extends PersistentState {
 
 	public String describe() {
 		return String.format(
-			"Current siege base: %s in %s, claimed by %s. Siege active: %s. Siege failed: %s.",
+			"Current siege base: %s in %s, claimed by %s. Age level: %d. Completed sieges: %d. Siege pending: %s. Siege active: %s. Siege failed: %s. Last wave size: %d.",
 			basePos.toShortString(),
 			dimensionId,
 			claimedBy,
+			ageLevel,
+			completedSieges,
+			siegePending ? "yes" : "no",
 			siegeActive ? "yes" : "no",
-			siegeFailed ? "yes" : "no"
+			siegeFailed ? "yes" : "no",
+			lastWaveSize
 		);
 	}
 
@@ -157,8 +211,13 @@ public class SiegeBaseState extends PersistentState {
 		nbt.putInt("z", basePos.getZ());
 		nbt.putString("dimension", dimensionId);
 		nbt.putString("claimedBy", claimedBy);
+		nbt.putInt("ageLevel", ageLevel);
+		nbt.putInt("completedSieges", completedSieges);
+		nbt.putBoolean("siegePending", siegePending);
 		nbt.putBoolean("siegeActive", siegeActive);
 		nbt.putBoolean("siegeFailed", siegeFailed);
+		nbt.putInt("countdownTicks", countdownTicks);
+		nbt.putInt("lastWaveSize", lastWaveSize);
 		NbtList attackerList = new NbtList();
 		for (UUID attackerId : attackerIds) {
 			attackerList.add(NbtString.of(attackerId.toString()));
