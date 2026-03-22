@@ -29,6 +29,7 @@ public final class SiegeManager {
 	private static final int MAX_SPAWN_RADIUS = 36;
 	private static final double PLAYER_AGGRO_RANGE = 10.0D;
 	private static final double OBJECTIVE_ATTACK_RANGE = 2.25D;
+	private static final double BREACH_CHECK_RANGE = 3.0D;
 
 	private SiegeManager() {
 	}
@@ -123,6 +124,12 @@ public final class SiegeManager {
 		}
 
 		hostile.setTarget(null);
+		if (hostile instanceof VindicatorEntity || hostile instanceof PillagerEntity) {
+			if (tryBreachWall(hostile, world, objectivePos)) {
+				return;
+			}
+		}
+
 		Vec3d objectiveCenter = Vec3d.ofCenter(objectivePos);
 		if (hostile.squaredDistanceTo(objectiveCenter) > OBJECTIVE_ATTACK_RANGE * OBJECTIVE_ATTACK_RANGE) {
 			hostile.getNavigation().startMovingTo(objectiveCenter.x, objectiveCenter.y, objectiveCenter.z, 1.0D);
@@ -288,5 +295,41 @@ public final class SiegeManager {
 
 	private static boolean isObjectivePresent(ServerWorld world, BlockPos objectivePos) {
 		return world.getBlockState(objectivePos).isIn(BlockTags.BANNERS);
+	}
+
+	private static boolean tryBreachWall(HostileEntity hostile, ServerWorld world, BlockPos objectivePos) {
+		Vec3d direction = Vec3d.ofCenter(objectivePos).subtract(hostile.getPos()).normalize();
+		BlockPos ahead = BlockPos.ofFloored(
+			hostile.getX() + direction.x * 1.5D,
+			hostile.getY(),
+			hostile.getZ() + direction.z * 1.5D
+		);
+
+		BlockPos[] candidates = new BlockPos[] {
+			ahead,
+			ahead.up(),
+			ahead.down()
+		};
+
+		for (BlockPos candidate : candidates) {
+			WallTier tier = WallTier.from(world.getBlockState(candidate));
+			if (tier == WallTier.NONE) {
+				continue;
+			}
+
+			if (hostile.squaredDistanceTo(Vec3d.ofCenter(candidate)) > BREACH_CHECK_RANGE * BREACH_CHECK_RANGE) {
+				hostile.getNavigation().startMovingTo(candidate.getX(), candidate.getY(), candidate.getZ(), 1.0D);
+				return true;
+			}
+
+			hostile.getNavigation().stop();
+			hostile.swingHand(hostile.getMainHandStack().isEmpty() ? hostile.getActiveHand() : net.minecraft.util.Hand.MAIN_HAND);
+			if (hostile.age % 15 == 0) {
+				SiegeBaseState.get(world.getServer()).damageWall(world, candidate, 1);
+			}
+			return true;
+		}
+
+		return false;
 	}
 }

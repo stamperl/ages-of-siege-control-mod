@@ -4,6 +4,7 @@ import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtList;
 import net.minecraft.nbt.NbtString;
+import net.minecraft.nbt.NbtLong;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
@@ -14,9 +15,12 @@ import net.minecraft.world.PersistentState;
 import net.minecraft.world.PersistentStateManager;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
+import com.stamperl.agesofsiege.siege.WallTier;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class SiegeBaseState extends PersistentState {
@@ -38,6 +42,7 @@ public class SiegeBaseState extends PersistentState {
 	private int lastWaveSize;
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
 	private final List<UUID> attackerIds = new ArrayList<>();
+	private final Map<Long, Integer> wallHealth = new HashMap<>();
 
 	public static SiegeBaseState get(MinecraftServer server) {
 		ServerWorld overworld = server.getOverworld();
@@ -62,6 +67,11 @@ public class SiegeBaseState extends PersistentState {
 		NbtList attackerList = nbt.getList("attackers", NbtElement.STRING_TYPE);
 		for (NbtElement element : attackerList) {
 			state.attackerIds.add(UUID.fromString(element.asString()));
+		}
+		NbtList wallList = nbt.getList("wallHealth", NbtElement.COMPOUND_TYPE);
+		for (NbtElement element : wallList) {
+			NbtCompound entry = (NbtCompound) element;
+			state.wallHealth.put(entry.getLong("pos"), entry.getInt("hp"));
 		}
 		return state;
 	}
@@ -89,6 +99,7 @@ public class SiegeBaseState extends PersistentState {
 		this.lastWaveSize = 0;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.attackerIds.clear();
+		this.wallHealth.clear();
 		markDirty();
 	}
 
@@ -163,6 +174,7 @@ public class SiegeBaseState extends PersistentState {
 		this.countdownTicks = countdownSeconds * 20;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.attackerIds.clear();
+		this.wallHealth.clear();
 		server.getPlayerManager().broadcast(
 			Text.literal("A siege is approaching. Defend the Settlement Standard."),
 			false
@@ -188,6 +200,7 @@ public class SiegeBaseState extends PersistentState {
 		this.lastWaveSize = waveSize;
 		this.attackerIds.clear();
 		this.attackerIds.addAll(attackerIds);
+		this.wallHealth.clear();
 		server.getPlayerManager().broadcast(Text.literal("A siege has begun. Defend the Settlement Standard!"), false);
 		markDirty();
 	}
@@ -202,6 +215,7 @@ public class SiegeBaseState extends PersistentState {
 			this.ageLevel = resolveAgeLevel(this.completedSieges);
 		}
 		this.attackerIds.clear();
+		this.wallHealth.clear();
 		markDirty();
 	}
 
@@ -225,6 +239,30 @@ public class SiegeBaseState extends PersistentState {
 		}
 
 		markDirty();
+	}
+
+	public boolean damageWall(ServerWorld world, BlockPos pos, int amount) {
+		WallTier tier = WallTier.from(world.getBlockState(pos));
+		if (tier == WallTier.NONE) {
+			return false;
+		}
+
+		long key = pos.asLong();
+		int remaining = wallHealth.getOrDefault(key, tier.getHitPoints()) - amount;
+		if (remaining <= 0) {
+			wallHealth.remove(key);
+			world.breakBlock(pos, false);
+			world.getServer().getPlayerManager().broadcast(
+				Text.literal("A breacher smashed through a " + tier.name().toLowerCase() + " wall block."),
+				false
+			);
+			markDirty();
+			return true;
+		}
+
+		wallHealth.put(key, remaining);
+		markDirty();
+		return true;
 	}
 
 	public void handleObjectiveDestroyed(ServerWorld world, BlockPos pos) {
@@ -292,6 +330,14 @@ public class SiegeBaseState extends PersistentState {
 			attackerList.add(NbtString.of(attackerId.toString()));
 		}
 		nbt.put("attackers", attackerList);
+		NbtList wallList = new NbtList();
+		for (Map.Entry<Long, Integer> entry : wallHealth.entrySet()) {
+			NbtCompound wallEntry = new NbtCompound();
+			wallEntry.putLong("pos", entry.getKey());
+			wallEntry.putInt("hp", entry.getValue());
+			wallList.add(wallEntry);
+		}
+		nbt.put("wallHealth", wallList);
 		return nbt;
 	}
 
