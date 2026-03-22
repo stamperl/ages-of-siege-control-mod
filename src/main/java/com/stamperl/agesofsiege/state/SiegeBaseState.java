@@ -1,12 +1,22 @@
 package com.stamperl.agesofsiege.state;
 
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtElement;
+import net.minecraft.nbt.NbtList;
+import net.minecraft.nbt.NbtString;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.PersistentState;
 import net.minecraft.world.PersistentStateManager;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 public class SiegeBaseState extends PersistentState {
 	private static final String STATE_KEY = "ages_of_siege_base";
@@ -17,6 +27,7 @@ public class SiegeBaseState extends PersistentState {
 	private String claimedBy = "unknown";
 	private boolean siegeActive;
 	private boolean siegeFailed;
+	private final List<UUID> attackerIds = new ArrayList<>();
 
 	public static SiegeBaseState get(MinecraftServer server) {
 		ServerWorld overworld = server.getOverworld();
@@ -32,6 +43,10 @@ public class SiegeBaseState extends PersistentState {
 		state.claimedBy = nbt.getString("claimedBy");
 		state.siegeActive = nbt.getBoolean("siegeActive");
 		state.siegeFailed = nbt.getBoolean("siegeFailed");
+		NbtList attackerList = nbt.getList("attackers", NbtElement.STRING_TYPE);
+		for (NbtElement element : attackerList) {
+			state.attackerIds.add(UUID.fromString(element.asString()));
+		}
 		return state;
 	}
 
@@ -51,6 +66,7 @@ public class SiegeBaseState extends PersistentState {
 		this.claimedBy = "unknown";
 		this.siegeActive = false;
 		this.siegeFailed = false;
+		this.attackerIds.clear();
 		markDirty();
 	}
 
@@ -58,9 +74,38 @@ public class SiegeBaseState extends PersistentState {
 		return hasBase;
 	}
 
-	public void startSiege(MinecraftServer server) {
+	public BlockPos getBasePos() {
+		return basePos;
+	}
+
+	public boolean isSiegeActive() {
+		return siegeActive;
+	}
+
+	public List<UUID> getAttackerIds() {
+		return List.copyOf(attackerIds);
+	}
+
+	public void replaceAttackers(List<UUID> attackerIds) {
+		this.attackerIds.clear();
+		this.attackerIds.addAll(attackerIds);
+		markDirty();
+	}
+
+	public ServerWorld getBaseWorld(MinecraftServer server) {
+		Identifier id = Identifier.tryParse(dimensionId);
+		if (id == null) {
+			return null;
+		}
+
+		return server.getWorld(RegistryKey.of(RegistryKeys.WORLD, id));
+	}
+
+	public void startSiege(MinecraftServer server, List<UUID> attackerIds) {
 		this.siegeActive = true;
 		this.siegeFailed = false;
+		this.attackerIds.clear();
+		this.attackerIds.addAll(attackerIds);
 		server.getPlayerManager().broadcast(Text.literal("A siege has begun. Defend the Settlement Standard!"), false);
 		markDirty();
 	}
@@ -68,6 +113,7 @@ public class SiegeBaseState extends PersistentState {
 	public void endSiege(boolean failed) {
 		this.siegeActive = false;
 		this.siegeFailed = failed;
+		this.attackerIds.clear();
 		markDirty();
 	}
 
@@ -113,6 +159,11 @@ public class SiegeBaseState extends PersistentState {
 		nbt.putString("claimedBy", claimedBy);
 		nbt.putBoolean("siegeActive", siegeActive);
 		nbt.putBoolean("siegeFailed", siegeFailed);
+		NbtList attackerList = new NbtList();
+		for (UUID attackerId : attackerIds) {
+			attackerList.add(NbtString.of(attackerId.toString()));
+		}
+		nbt.put("attackers", attackerList);
 		return nbt;
 	}
 }

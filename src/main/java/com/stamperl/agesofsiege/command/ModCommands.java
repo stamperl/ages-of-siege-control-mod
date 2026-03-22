@@ -1,6 +1,7 @@
 package com.stamperl.agesofsiege.command;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.stamperl.agesofsiege.siege.SiegeManager;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.server.command.CommandManager;
@@ -62,7 +63,12 @@ public final class ModCommands {
 			return 0;
 		}
 
-		state.startSiege(player.getServer());
+		if (!SiegeManager.startSiege(player.getServer(), state)) {
+			player.sendMessage(Text.literal("Could not start the siege. Make sure the objective exists and no siege is already active.")
+				.formatted(Formatting.RED), false);
+			return 0;
+		}
+
 		player.sendMessage(Text.literal("Test siege started. If the Settlement Standard is destroyed, the siege fails.")
 			.formatted(Formatting.GOLD), false);
 		return 1;
