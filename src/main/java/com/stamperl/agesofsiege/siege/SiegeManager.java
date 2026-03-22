@@ -43,6 +43,7 @@ public final class SiegeManager {
 	private static final double SUPPORT_PLAYER_AGGRO_RANGE = 18.0D;
 	private static final double OBJECTIVE_ATTACK_RANGE = 2.25D;
 	private static final double BREACH_CHECK_RANGE = 3.0D;
+	private static final double BREACH_VERTICAL_REACH = 3.0D;
 	private static final double BREACH_SLOT_RADIUS = 1.75D;
 	private static final double BREACH_SIDESTEP_DISTANCE = 1.5D;
 	private static final double SUPPORT_FORMATION_RADIUS = 6.0D;
@@ -683,14 +684,13 @@ public final class SiegeManager {
 			pathSource = pathLead.getPos();
 		}
 
-		BlockPos primaryBreachTarget = getStablePrimaryBreachTarget(world, state, objectivePos, furthestRam, pathSource);
+		InfantryPathResult initialPathResult = findInfantryPath(world, pathSource, objectiveCenter, ASSAULT_LANE_CHECK_DISTANCE, 2);
+		BlockPos frontierBase = initialPathResult.frontierTarget() != null ? getWallBase(initialPathResult.frontierTarget(), world) : null;
+		BlockPos primaryBreachTarget = getStablePrimaryBreachTarget(world, state, objectivePos, furthestRam, pathSource, frontierBase);
 		Vec3d reachabilitySource = primaryBreachTarget != null && WallTier.from(world.getBlockState(primaryBreachTarget)) == WallTier.NONE
 			? Vec3d.ofCenter(primaryBreachTarget)
 			: pathSource;
 		InfantryPathResult pathResult = findInfantryPath(world, reachabilitySource, objectiveCenter, ASSAULT_LANE_CHECK_DISTANCE, 2);
-		if (!pathResult.reachable() && furthestRam == null && pathResult.frontierTarget() != null) {
-			primaryBreachTarget = getWallBase(pathResult.frontierTarget(), world);
-		}
 		if (pathResult.reachable()) {
 			state.setPrimaryBreachTarget(null);
 		}
@@ -707,19 +707,68 @@ public final class SiegeManager {
 		return new AssaultDecision(blockedMode, pathLead.getUuid(), primaryBreachTarget, false, furthestRam != null, breachTeamAlive);
 	}
 
-	private static BlockPos getStablePrimaryBreachTarget(ServerWorld world, SiegeBaseState state, BlockPos objectivePos, SiegeRamEntity furthestRam, Vec3d pathSource) {
+	private static BlockPos getStablePrimaryBreachTarget(
+		ServerWorld world,
+		SiegeBaseState state,
+		BlockPos objectivePos,
+		SiegeRamEntity furthestRam,
+		Vec3d pathSource,
+		BlockPos frontierBase
+	) {
 		BlockPos current = state.getPrimaryBreachTarget();
 		if (current != null) {
-			BlockPos anchorBase = getWallBase(current, world);
-			if (isBreachZoneActive(world, anchorBase, objectivePos)) {
-				return anchorBase;
+			BlockPos committed = resolveCommittedBreachAnchor(world, getWallBase(current, world), objectivePos);
+			if (committed != null) {
+				if (!committed.equals(current)) {
+					state.setPrimaryBreachTarget(committed);
+				}
+				return committed;
 			}
 		}
 		BlockPos next = furthestRam != null
 			? getEffectiveRamTarget(world, furthestRam, objectivePos)
-			: findBestRamBreachTarget(world, pathSource, objectivePos);
+			: frontierBase != null ? frontierBase : findBestRamBreachTarget(world, pathSource, objectivePos);
 		state.setPrimaryBreachTarget(next);
 		return next;
+	}
+
+	private static BlockPos resolveCommittedBreachAnchor(ServerWorld world, BlockPos anchorBase, BlockPos objectivePos) {
+		if (anchorBase == null) {
+			return null;
+		}
+		if (WallTier.from(world.getBlockState(anchorBase)) != WallTier.NONE && isBreachZoneActive(world, anchorBase, objectivePos)) {
+			return anchorBase;
+		}
+
+		Vec3d[] axes = getBreachAxes(anchorBase, objectivePos);
+		Vec3d forward = axes[0];
+		Vec3d right = axes[1];
+		BlockPos best = null;
+		double bestScore = Double.MAX_VALUE;
+		int scanHeight = Math.max(3, getRamWallHeight(world, anchorBase) + 1);
+		for (int depth = -1; depth <= 4; depth++) {
+			for (int lateral = -3; lateral <= 3; lateral++) {
+				BlockPos base = anchorBase.add(
+					MathHelper.floor(forward.x * depth + right.x * lateral),
+					0,
+					MathHelper.floor(forward.z * depth + right.z * lateral)
+				);
+				for (int yOffset = 0; yOffset <= scanHeight; yOffset++) {
+					BlockPos candidate = base.up(yOffset);
+					WallTier tier = WallTier.from(world.getBlockState(candidate));
+					if (tier == WallTier.NONE) {
+						continue;
+					}
+					BlockPos candidateBase = getWallBase(candidate, world);
+					double score = Math.max(0, depth) * 25.0D + Math.abs(lateral) * 4.0D + yOffset * 2.0D;
+					if (best == null || score < bestScore) {
+						best = candidateBase;
+						bestScore = score;
+					}
+				}
+			}
+		}
+		return best;
 	}
 
 	private static BlockPos getAssignedBreachFaceTarget(BreachGridPlan plan, HostileEntity hostile) {
@@ -1296,13 +1345,14 @@ public final class SiegeManager {
 		}
 
 		Vec3d targetCenter = Vec3d.ofCenter(target);
-		double targetDistanceSq = hostile.squaredDistanceTo(targetCenter);
-		double approachDistanceSq = hostile.squaredDistanceTo(approachPos);
-		if (approachDistanceSq > 2.75D * 2.75D) {
+		double targetHorizontalDistanceSq = squaredHorizontalDistance(hostile.getPos(), targetCenter);
+		double approachHorizontalDistanceSq = squaredHorizontalDistance(hostile.getPos(), approachPos);
+		double targetVerticalDistance = Math.abs(targetCenter.y - hostile.getY());
+		if (approachHorizontalDistanceSq > 2.75D * 2.75D) {
 			moveInfantryToward(hostile, world, approachPos, 1.0D);
 			return true;
 		}
-		if (targetDistanceSq > BREACH_CHECK_RANGE * BREACH_CHECK_RANGE) {
+		if (targetHorizontalDistanceSq > BREACH_CHECK_RANGE * BREACH_CHECK_RANGE || targetVerticalDistance > BREACH_VERTICAL_REACH) {
 			moveInfantryToward(hostile, world, approachPos, 1.0D);
 			return true;
 		}
@@ -1313,17 +1363,24 @@ public final class SiegeManager {
 		if (hostile.age % attackIntervalTicks == 0) {
 			if (DEBUG_LOGGING) {
 				AgesOfSiegeMod.LOGGER.info(
-					"[SiegeDebug] wall-hit attacker={} target={} damage={} targetDistanceSq={} approachDistanceSq={}",
+					"[SiegeDebug] wall-hit attacker={} target={} damage={} targetHorizontalDistanceSq={} approachHorizontalDistanceSq={} targetVerticalDistance={}",
 					hostile.getType().getUntranslatedName(),
 					target,
 					damage,
-					targetDistanceSq,
-					approachDistanceSq
+					targetHorizontalDistanceSq,
+					approachHorizontalDistanceSq,
+					targetVerticalDistance
 				);
 			}
 			SiegeBaseState.get(world.getServer()).damageWall(world, target, damage);
 		}
 		return true;
+	}
+
+	private static double squaredHorizontalDistance(Vec3d a, Vec3d b) {
+		double dx = a.x - b.x;
+		double dz = a.z - b.z;
+		return dx * dx + dz * dz;
 	}
 
 	private static boolean tryFallbackWallAssault(HostileEntity hostile, ServerWorld world, BlockPos objectivePos, int damage, int attackIntervalTicks) {
