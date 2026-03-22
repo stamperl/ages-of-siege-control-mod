@@ -20,6 +20,7 @@ import java.util.UUID;
 
 public class SiegeBaseState extends PersistentState {
 	private static final String STATE_KEY = "ages_of_siege_base";
+	private static final int MAX_OBJECTIVE_HEALTH = 30;
 
 	private boolean hasBase;
 	private BlockPos basePos = BlockPos.ORIGIN;
@@ -32,6 +33,7 @@ public class SiegeBaseState extends PersistentState {
 	private boolean siegeFailed;
 	private int countdownTicks;
 	private int lastWaveSize;
+	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
 	private final List<UUID> attackerIds = new ArrayList<>();
 
 	public static SiegeBaseState get(MinecraftServer server) {
@@ -53,6 +55,7 @@ public class SiegeBaseState extends PersistentState {
 		state.siegeFailed = nbt.getBoolean("siegeFailed");
 		state.countdownTicks = nbt.getInt("countdownTicks");
 		state.lastWaveSize = nbt.getInt("lastWaveSize");
+		state.objectiveHealth = nbt.contains("objectiveHealth") ? nbt.getInt("objectiveHealth") : MAX_OBJECTIVE_HEALTH;
 		NbtList attackerList = nbt.getList("attackers", NbtElement.STRING_TYPE);
 		for (NbtElement element : attackerList) {
 			state.attackerIds.add(UUID.fromString(element.asString()));
@@ -67,6 +70,7 @@ public class SiegeBaseState extends PersistentState {
 		this.claimedBy = claimedBy;
 		this.ageLevel = Math.max(this.ageLevel, 0);
 		this.siegeFailed = false;
+		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		markDirty();
 	}
 
@@ -80,6 +84,7 @@ public class SiegeBaseState extends PersistentState {
 		this.siegeFailed = false;
 		this.countdownTicks = 0;
 		this.lastWaveSize = 0;
+		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.attackerIds.clear();
 		markDirty();
 	}
@@ -98,6 +103,14 @@ public class SiegeBaseState extends PersistentState {
 
 	public boolean isSiegePending() {
 		return siegePending;
+	}
+
+	public int getObjectiveHealth() {
+		return objectiveHealth;
+	}
+
+	public int getMaxObjectiveHealth() {
+		return MAX_OBJECTIVE_HEALTH;
 	}
 
 	public List<UUID> getAttackerIds() {
@@ -124,6 +137,7 @@ public class SiegeBaseState extends PersistentState {
 		this.siegeActive = false;
 		this.siegeFailed = false;
 		this.countdownTicks = countdownSeconds * 20;
+		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.attackerIds.clear();
 		server.getPlayerManager().broadcast(
 			Text.literal("A siege is approaching. Defend the Settlement Standard."),
@@ -167,6 +181,28 @@ public class SiegeBaseState extends PersistentState {
 		markDirty();
 	}
 
+	public void damageObjective(ServerWorld world, int amount) {
+		if (!hasBase) {
+			return;
+		}
+
+		this.objectiveHealth = Math.max(0, this.objectiveHealth - amount);
+		if (this.objectiveHealth == 0) {
+			world.breakBlock(basePos, false);
+			handleObjectiveDestroyed(world, basePos);
+			return;
+		}
+
+		if (siegeActive) {
+			world.getServer().getPlayerManager().broadcast(
+				Text.literal("Settlement banner damaged: " + objectiveHealth + "/" + MAX_OBJECTIVE_HEALTH + " HP"),
+				false
+			);
+		}
+
+		markDirty();
+	}
+
 	public void handleObjectiveDestroyed(ServerWorld world, BlockPos pos) {
 		if (!hasBase || !basePos.equals(pos) || !world.getRegistryKey().getValue().toString().equals(dimensionId)) {
 			return;
@@ -190,10 +226,12 @@ public class SiegeBaseState extends PersistentState {
 
 	public String describe() {
 		return String.format(
-			"Current siege base: %s in %s, claimed by %s. Age level: %d. Completed sieges: %d. Siege pending: %s. Siege active: %s. Siege failed: %s. Last wave size: %d.",
+			"Current siege base: %s in %s, claimed by %s. Objective HP: %d/%d. Age level: %d. Completed sieges: %d. Siege pending: %s. Siege active: %s. Siege failed: %s. Last wave size: %d.",
 			basePos.toShortString(),
 			dimensionId,
 			claimedBy,
+			objectiveHealth,
+			MAX_OBJECTIVE_HEALTH,
 			ageLevel,
 			completedSieges,
 			siegePending ? "yes" : "no",
@@ -218,6 +256,7 @@ public class SiegeBaseState extends PersistentState {
 		nbt.putBoolean("siegeFailed", siegeFailed);
 		nbt.putInt("countdownTicks", countdownTicks);
 		nbt.putInt("lastWaveSize", lastWaveSize);
+		nbt.putInt("objectiveHealth", objectiveHealth);
 		NbtList attackerList = new NbtList();
 		for (UUID attackerId : attackerIds) {
 			attackerList.add(NbtString.of(attackerId.toString()));

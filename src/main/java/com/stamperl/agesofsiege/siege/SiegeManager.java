@@ -1,6 +1,7 @@
 package com.stamperl.agesofsiege.siege;
 
 import com.stamperl.agesofsiege.state.SiegeBaseState;
+import net.minecraft.block.Blocks;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
@@ -49,7 +50,7 @@ public final class SiegeManager {
 		}
 
 		BlockPos objectivePos = state.getBasePos();
-		if (!world.getBlockState(objectivePos).isOf(com.stamperl.agesofsiege.block.ModBlocks.SETTLEMENT_STANDARD)) {
+		if (!world.getBlockState(objectivePos).isOf(Blocks.WHITE_BANNER)) {
 			state.handleObjectiveDestroyed(world, objectivePos);
 			return;
 		}
@@ -124,7 +125,7 @@ public final class SiegeManager {
 		hostile.swingHand(hostile.getActiveHand());
 
 		if (hostile.age % 20 == 0) {
-			world.breakBlock(objectivePos, false, hostile);
+			SiegeBaseState.get(world.getServer()).damageObjective(world, 1);
 		}
 	}
 
