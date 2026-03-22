@@ -7,8 +7,8 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.mob.HostileEntity;
-import net.minecraft.entity.mob.SkeletonEntity;
-import net.minecraft.entity.mob.ZombieEntity;
+import net.minecraft.entity.mob.PillagerEntity;
+import net.minecraft.entity.mob.VindicatorEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -19,7 +19,6 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
-import net.minecraft.world.World;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -240,15 +239,23 @@ public final class SiegeManager {
 
 	private static HostileEntity createAttacker(ServerWorld world, SiegeBaseState state, int index) {
 		if (state.getAgeLevel() >= 2 && index % 3 == 0) {
-			return EntityType.SKELETON.create(world);
+			return EntityType.PILLAGER.create(world);
 		}
 
-		return EntityType.ZOMBIE.create(world);
+		if (state.getAgeLevel() >= 1 && index % 2 == 0) {
+			return EntityType.VINDICATOR.create(world);
+		}
+
+		return EntityType.PILLAGER.create(world);
 	}
 
 	private static void equipAttacker(HostileEntity attacker, SiegeBaseState state) {
-		if (attacker instanceof SkeletonEntity skeleton) {
-			skeleton.equipStack(net.minecraft.entity.EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
+		if (attacker instanceof PillagerEntity pillager) {
+			pillager.equipStack(net.minecraft.entity.EquipmentSlot.MAINHAND, new ItemStack(Items.CROSSBOW));
+		}
+
+		if (attacker instanceof VindicatorEntity vindicator) {
+			vindicator.equipStack(net.minecraft.entity.EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_AXE));
 		}
 
 		if (state.getAgeLevel() >= 1) {
@@ -257,6 +264,10 @@ public final class SiegeManager {
 
 		if (state.getAgeLevel() >= 2) {
 			attacker.equipStack(net.minecraft.entity.EquipmentSlot.CHEST, new ItemStack(Items.CHAINMAIL_CHESTPLATE));
+		}
+
+		if (state.getAgeLevel() >= 3) {
+			attacker.equipStack(net.minecraft.entity.EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
 		}
 	}
 
