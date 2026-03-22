@@ -30,7 +30,7 @@ public class SettlementStandardItem extends Item {
 
 		BlockPos clickedPos = context.getBlockPos();
 		Direction side = context.getSide();
-		BlockPos targetPos = world.getBlockState(clickedPos).canReplace(context) ? clickedPos : clickedPos.offset(side);
+		BlockPos targetPos = world.getBlockState(clickedPos).isReplaceable() ? clickedPos : clickedPos.offset(side);
 		if (side == Direction.DOWN || !world.getBlockState(targetPos).isReplaceable()) {
 			return ActionResult.FAIL;
 		}
