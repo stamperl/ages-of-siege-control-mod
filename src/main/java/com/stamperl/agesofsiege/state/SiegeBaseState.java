@@ -1,6 +1,7 @@
 package com.stamperl.agesofsiege.state;
 
 import com.stamperl.agesofsiege.siege.SiegeManager;
+import net.minecraft.block.Block;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtList;
@@ -40,6 +41,9 @@ public class SiegeBaseState extends PersistentState {
 	private boolean siegePending;
 	private boolean siegeFailed;
 	private boolean breachOpen;
+	private boolean assaultModePrimed;
+	private int rushTicks;
+	private int breachedWallBlocks;
 	private int countdownTicks;
 	private int lastWaveSize;
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
@@ -65,6 +69,9 @@ public class SiegeBaseState extends PersistentState {
 		state.siegePending = nbt.getBoolean("siegePending");
 		state.siegeFailed = nbt.getBoolean("siegeFailed");
 		state.breachOpen = nbt.getBoolean("breachOpen");
+		state.assaultModePrimed = nbt.getBoolean("assaultModePrimed");
+		state.rushTicks = nbt.getInt("rushTicks");
+		state.breachedWallBlocks = nbt.getInt("breachedWallBlocks");
 		state.countdownTicks = nbt.getInt("countdownTicks");
 		state.lastWaveSize = nbt.getInt("lastWaveSize");
 		state.objectiveHealth = nbt.contains("objectiveHealth") ? nbt.getInt("objectiveHealth") : MAX_OBJECTIVE_HEALTH;
@@ -92,6 +99,9 @@ public class SiegeBaseState extends PersistentState {
 		this.ageLevel = Math.max(this.ageLevel, 0);
 		this.siegeFailed = false;
 		this.breachOpen = false;
+		this.assaultModePrimed = false;
+		this.rushTicks = 0;
+		this.breachedWallBlocks = 0;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		markDirty();
 	}
@@ -105,6 +115,9 @@ public class SiegeBaseState extends PersistentState {
 		this.siegeActive = false;
 		this.siegeFailed = false;
 		this.breachOpen = false;
+		this.assaultModePrimed = false;
+		this.rushTicks = 0;
+		this.breachedWallBlocks = 0;
 		this.countdownTicks = 0;
 		this.lastWaveSize = 0;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
@@ -142,6 +155,34 @@ public class SiegeBaseState extends PersistentState {
 		markDirty();
 	}
 
+	public boolean isAssaultModePrimed() {
+		return assaultModePrimed;
+	}
+
+	public void setAssaultModePrimed(boolean assaultModePrimed) {
+		if (this.assaultModePrimed == assaultModePrimed) {
+			return;
+		}
+		this.assaultModePrimed = assaultModePrimed;
+		markDirty();
+	}
+
+	public int getRushTicks() {
+		return rushTicks;
+	}
+
+	public void setRushTicks(int rushTicks) {
+		if (this.rushTicks == rushTicks) {
+			return;
+		}
+		this.rushTicks = rushTicks;
+		markDirty();
+	}
+
+	public int getBreachedWallBlocks() {
+		return breachedWallBlocks;
+	}
+
 	public int getObjectiveHealth() {
 		return objectiveHealth;
 	}
@@ -164,6 +205,9 @@ public class SiegeBaseState extends PersistentState {
 		this.completedSieges = AGE_THRESHOLDS[clampedAge];
 		this.siegeFailed = false;
 		this.breachOpen = false;
+		this.assaultModePrimed = false;
+		this.rushTicks = 0;
+		this.breachedWallBlocks = 0;
 		markDirty();
 	}
 
@@ -214,6 +258,9 @@ public class SiegeBaseState extends PersistentState {
 		this.siegeActive = false;
 		this.siegeFailed = false;
 		this.breachOpen = false;
+		this.assaultModePrimed = false;
+		this.rushTicks = 0;
+		this.breachedWallBlocks = 0;
 		this.countdownTicks = countdownSeconds * 20;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.attackerIds.clear();
@@ -241,6 +288,9 @@ public class SiegeBaseState extends PersistentState {
 		this.siegeActive = true;
 		this.siegeFailed = false;
 		this.breachOpen = false;
+		this.assaultModePrimed = false;
+		this.rushTicks = 0;
+		this.breachedWallBlocks = 0;
 		this.countdownTicks = 0;
 		this.lastWaveSize = waveSize;
 		this.attackerIds.clear();
@@ -257,6 +307,9 @@ public class SiegeBaseState extends PersistentState {
 		this.siegeActive = false;
 		this.siegeFailed = failed;
 		this.breachOpen = false;
+		this.assaultModePrimed = false;
+		this.rushTicks = 0;
+		this.breachedWallBlocks = 0;
 		this.countdownTicks = 0;
 		if (rewardProgress && !failed) {
 			this.completedSieges++;
@@ -291,16 +344,19 @@ public class SiegeBaseState extends PersistentState {
 	}
 
 	public boolean damageWall(ServerWorld world, BlockPos pos, int amount) {
-		WallTier tier = WallTier.from(world.getBlockState(pos));
+		var state = world.getBlockState(pos);
+		WallTier tier = WallTier.from(state);
 		if (tier == WallTier.NONE) {
 			return false;
 		}
 
 		long key = pos.asLong();
 		int remaining = wallHealth.getOrDefault(key, tier.getHitPoints()) - amount;
+		world.syncWorldEvent(2001, pos, Block.getRawIdFromState(state));
 		if (remaining <= 0) {
 			wallHealth.remove(key);
 			world.breakBlock(pos, false);
+			breachedWallBlocks++;
 			world.getServer().getPlayerManager().broadcast(
 				Text.literal("A breacher smashed through a " + tier.name().toLowerCase() + " wall block."),
 				false
@@ -368,6 +424,9 @@ public class SiegeBaseState extends PersistentState {
 		nbt.putBoolean("siegeActive", siegeActive);
 		nbt.putBoolean("siegeFailed", siegeFailed);
 		nbt.putBoolean("breachOpen", breachOpen);
+		nbt.putBoolean("assaultModePrimed", assaultModePrimed);
+		nbt.putInt("rushTicks", rushTicks);
+		nbt.putInt("breachedWallBlocks", breachedWallBlocks);
 		nbt.putInt("countdownTicks", countdownTicks);
 		nbt.putInt("lastWaveSize", lastWaveSize);
 		nbt.putInt("objectiveHealth", objectiveHealth);
