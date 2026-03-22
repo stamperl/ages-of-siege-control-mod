@@ -80,6 +80,16 @@ public final class SiegeManager {
 		INFANTRY_BREACH
 	}
 
+	private record AssaultDecision(
+		AssaultMode mode,
+		UUID leadUnitId,
+		BlockPos primaryBreachTarget,
+		boolean pathReachable,
+		boolean activeRam,
+		boolean breachTeamAlive
+	) {
+	}
+
 	private record InfantryPathResult(boolean reachable, BlockPos startFoot, int explored) {
 	}
 
@@ -117,7 +127,8 @@ public final class SiegeManager {
 			return;
 		}
 
-		AssaultMode assaultMode = computeAssaultMode(world, state, objectivePos);
+		AssaultDecision decision = evaluateAssaultDecision(world, state, objectivePos);
+		AssaultMode assaultMode = decision.mode();
 		state.setBreachOpen(assaultMode == AssaultMode.RUSH_BANNER);
 		state.setRushTicks(assaultMode == AssaultMode.RUSH_BANNER ? state.getRushTicks() + 1 : 0);
 		if (DEBUG_LOGGING && world.getTime() % 20L == 0L) {
@@ -142,7 +153,7 @@ public final class SiegeManager {
 			}
 
 			livingAttackers.add(attackerId);
-			updateAttacker(hostile, world, objectivePos, state, assaultMode);
+			updateAttacker(hostile, world, objectivePos, state, decision);
 		}
 
 		state.replaceAttackers(livingAttackers);
@@ -155,7 +166,7 @@ public final class SiegeManager {
 			}
 
 			livingRams.add(ramId);
-			updateRam(ram, world, objectivePos, assaultMode);
+			updateRam(ram, world, objectivePos, decision);
 		}
 
 		state.replaceRams(livingRams);
@@ -191,19 +202,19 @@ public final class SiegeManager {
 		}
 	}
 
-	private static void updateAttacker(HostileEntity hostile, ServerWorld world, BlockPos objectivePos, SiegeBaseState state, AssaultMode assaultMode) {
+	private static void updateAttacker(HostileEntity hostile, ServerWorld world, BlockPos objectivePos, SiegeBaseState state, AssaultDecision decision) {
 		suppressPotionUse(hostile);
 		if (hostile.getCommandTags().contains(RAM_ESCORT_TAG)) {
-			updateRamEscort(hostile, world, state, assaultMode);
+			updateRamEscort(hostile, world, state, decision);
 			return;
 		}
 
 		if (hostile.getCommandTags().contains(RANGED_ROLE_TAG)) {
-			updateRangedAttacker(hostile, world, objectivePos, state, assaultMode);
+			updateRangedAttacker(hostile, world, objectivePos, state, decision);
 			return;
 		}
 
-		updateBreacherAttacker(hostile, world, objectivePos, assaultMode);
+		updateBreacherAttacker(hostile, world, objectivePos, decision);
 	}
 
 	public static boolean startSiege(MinecraftServer server, SiegeBaseState state) {
@@ -416,10 +427,11 @@ public final class SiegeManager {
 		return ram;
 	}
 
-	private static void updateRam(SiegeRamEntity ram, ServerWorld world, BlockPos objectivePos, AssaultMode assaultMode) {
+	private static void updateRam(SiegeRamEntity ram, ServerWorld world, BlockPos objectivePos, AssaultDecision decision) {
 		SiegeBaseState state = SiegeBaseState.get(world.getServer());
 		Vec3d ramPos = ram.getPos();
 		Vec3d objectiveCenter = Vec3d.ofCenter(objectivePos);
+		AssaultMode assaultMode = decision.mode();
 		if (assaultMode == AssaultMode.RUSH_BANNER) {
 			ram.setBreachTarget(null);
 			if (state.getRushTicks() <= RAM_BACKOFF_TICKS) {
@@ -435,7 +447,7 @@ public final class SiegeManager {
 			faceTowards(ram, objectiveCenter);
 			return;
 		}
-		BlockPos ramTarget = getEffectiveRamTarget(world, ram, objectivePos);
+		BlockPos ramTarget = decision.primaryBreachTarget() != null ? decision.primaryBreachTarget() : getEffectiveRamTarget(world, ram, objectivePos);
 		Vec3d targetCenter = ramTarget != null ? Vec3d.ofCenter(ramTarget) : objectiveCenter;
 		Vec3d flatDirection = new Vec3d(targetCenter.x - ramPos.x, 0.0D, targetCenter.z - ramPos.z);
 		if (flatDirection.lengthSquared() < 0.0001D) {
@@ -478,7 +490,8 @@ public final class SiegeManager {
 		ram.refreshPositionAndAngles(nextX, nextY, nextZ, yaw, 0.0F);
 	}
 
-	private static void updateRamEscort(HostileEntity escort, ServerWorld world, SiegeBaseState state, AssaultMode assaultMode) {
+	private static void updateRamEscort(HostileEntity escort, ServerWorld world, SiegeBaseState state, AssaultDecision decision) {
+		AssaultMode assaultMode = decision.mode();
 		SiegeRamEntity ram = getNearestRam(world, state, escort.getPos());
 		if (ram == null) {
 			escort.setTarget(null);
@@ -518,7 +531,8 @@ public final class SiegeManager {
 		}
 	}
 
-	private static void updateBreacherAttacker(HostileEntity hostile, ServerWorld world, BlockPos objectivePos, AssaultMode assaultMode) {
+	private static void updateBreacherAttacker(HostileEntity hostile, ServerWorld world, BlockPos objectivePos, AssaultDecision decision) {
+		AssaultMode assaultMode = decision.mode();
 		Vec3d objectiveCenter = Vec3d.ofCenter(objectivePos);
 		PlayerEntity playerTarget = world.getClosestPlayer(
 			hostile.getX(),
@@ -552,7 +566,9 @@ public final class SiegeManager {
 			return;
 		}
 
-		BlockPos breachTarget = findBestBreachTarget(world, hostile.getPos(), objectivePos);
+		BlockPos breachTarget = decision.primaryBreachTarget() != null
+			? decision.primaryBreachTarget()
+			: findBestBreachTarget(world, hostile.getPos(), objectivePos);
 		if (DEBUG_LOGGING && world.getTime() % 40L == 0L) {
 			AgesOfSiegeMod.LOGGER.info(
 				"[SiegeDebug] breacher={} mode={} breachTarget={} pos={}",
@@ -569,7 +585,8 @@ public final class SiegeManager {
 		advanceOnObjective(hostile, world, objectivePos, 1);
 	}
 
-	private static void updateRangedAttacker(HostileEntity hostile, ServerWorld world, BlockPos objectivePos, SiegeBaseState state, AssaultMode assaultMode) {
+	private static void updateRangedAttacker(HostileEntity hostile, ServerWorld world, BlockPos objectivePos, SiegeBaseState state, AssaultDecision decision) {
+		AssaultMode assaultMode = decision.mode();
 		if (assaultMode == AssaultMode.RUSH_BANNER) {
 			PlayerEntity playerTarget = world.getClosestPlayer(
 				hostile.getX(),
@@ -628,10 +645,17 @@ public final class SiegeManager {
 		}
 	}
 
-	private static AssaultMode computeAssaultMode(ServerWorld world, SiegeBaseState state, BlockPos objectivePos) {
+	private static AssaultDecision evaluateAssaultDecision(ServerWorld world, SiegeBaseState state, BlockPos objectivePos) {
 		if (!state.isAssaultModePrimed()) {
 			state.setAssaultModePrimed(true);
-			return getDefaultAssaultMode(state);
+			return new AssaultDecision(
+				getDefaultAssaultMode(state),
+				null,
+				null,
+				false,
+				!state.getRamIds().isEmpty(),
+				hasActiveBreachTeam(world, state)
+			);
 		}
 
 		Vec3d objectiveCenter = Vec3d.ofCenter(objectivePos);
@@ -639,19 +663,23 @@ public final class SiegeManager {
 		SiegeRamEntity furthestRam = getFurthestRam(world, state, objectiveCenter);
 		HostileEntity furthestAttacker = getFurthestAttacker(world, state, objectiveCenter);
 		Entity pathLead = furthestBreacher != null ? furthestBreacher : (furthestAttacker != null ? furthestAttacker : furthestRam);
+		boolean breachTeamAlive = hasActiveBreachTeam(world, state);
 		if (pathLead == null) {
-			return AssaultMode.RUSH_BANNER;
+			return new AssaultDecision(AssaultMode.RUSH_BANNER, null, null, true, furthestRam != null, breachTeamAlive);
 		}
 
 		InfantryPathResult pathResult = findInfantryPath(world, pathLead.getPos(), objectiveCenter, ASSAULT_LANE_CHECK_DISTANCE, 2);
+		BlockPos primaryBreachTarget = furthestRam != null
+			? getEffectiveRamTarget(world, furthestRam, objectivePos)
+			: findBestBreachTarget(world, pathLead.getPos(), objectivePos);
 		if (pathResult.reachable()) {
-			logAssaultDecision(world, pathLead, pathResult, furthestRam != null, AssaultMode.RUSH_BANNER);
-			return AssaultMode.RUSH_BANNER;
+			logAssaultDecision(world, pathLead, pathResult, furthestRam != null, primaryBreachTarget, AssaultMode.RUSH_BANNER);
+			return new AssaultDecision(AssaultMode.RUSH_BANNER, pathLead.getUuid(), primaryBreachTarget, true, furthestRam != null, breachTeamAlive);
 		}
 
 		AssaultMode blockedMode = furthestRam != null ? AssaultMode.SUPPORT_RAM : AssaultMode.INFANTRY_BREACH;
-		logAssaultDecision(world, pathLead, pathResult, furthestRam != null, blockedMode);
-		return blockedMode;
+		logAssaultDecision(world, pathLead, pathResult, furthestRam != null, primaryBreachTarget, blockedMode);
+		return new AssaultDecision(blockedMode, pathLead.getUuid(), primaryBreachTarget, false, furthestRam != null, breachTeamAlive);
 	}
 
 	private static AssaultMode getDefaultAssaultMode(SiegeBaseState state) {
@@ -1241,17 +1269,18 @@ public final class SiegeManager {
 		return true;
 	}
 
-	private static void logAssaultDecision(ServerWorld world, Entity pathLead, InfantryPathResult pathResult, boolean hasRam, AssaultMode mode) {
+	private static void logAssaultDecision(ServerWorld world, Entity pathLead, InfantryPathResult pathResult, boolean hasRam, BlockPos primaryBreachTarget, AssaultMode mode) {
 		if (!DEBUG_LOGGING || world.getTime() % 20L != 0L) {
 			return;
 		}
 		AgesOfSiegeMod.LOGGER.info(
-			"[SiegeDebug] decision lead={} hasRam={} reachable={} explored={} start={} -> {}",
+			"[SiegeDebug] decision lead={} hasRam={} reachable={} explored={} start={} breachTarget={} -> {}",
 			pathLead.getType().getUntranslatedName(),
 			hasRam,
 			pathResult.reachable(),
 			pathResult.explored(),
 			pathResult.startFoot(),
+			primaryBreachTarget,
 			mode
 		);
 	}
