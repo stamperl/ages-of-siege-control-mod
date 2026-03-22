@@ -1,3 +1,6 @@
 {
-  "parent": "minecraft:item/template_banner"
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "ages_of_siege:item/settlement_standard"
+  }
 }
