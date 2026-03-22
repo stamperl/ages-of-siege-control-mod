@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "ages_of_siege",
+  "version": "${version}",
+  "name": "Ages Of Siege Control Mod",
+  "description": "Core gameplay control layer for the Ages Of Siege pack.",
+  "authors": [
+    "Stamp",
+    "OpenAI Codex"
+  ],
+  "contact": {
+    "sources": "https://github.com/stamperl/ages-of-siege-control"
+  },
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.stamperl.agesofsiege.AgesOfSiegeMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "minecraft": "~1.20.1",
+    "java": ">=17",
+    "fabric-api": "*"
+  }
+}
