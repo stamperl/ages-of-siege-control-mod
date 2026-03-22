@@ -9,6 +9,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.world.PersistentState;
 import net.minecraft.world.PersistentStateManager;
 import net.minecraft.registry.RegistryKey;
@@ -21,6 +22,8 @@ import java.util.UUID;
 public class SiegeBaseState extends PersistentState {
 	private static final String STATE_KEY = "ages_of_siege_base";
 	private static final int MAX_OBJECTIVE_HEALTH = 30;
+	private static final int[] AGE_THRESHOLDS = {0, 1, 3, 6};
+	private static final String[] AGE_NAMES = {"Homestead", "Fortified", "Ironkeep", "Early Industry"};
 
 	private boolean hasBase;
 	private BlockPos basePos = BlockPos.ORIGIN;
@@ -113,6 +116,27 @@ public class SiegeBaseState extends PersistentState {
 		return MAX_OBJECTIVE_HEALTH;
 	}
 
+	public int getAgeLevel() {
+		return ageLevel;
+	}
+
+	public int getCompletedSieges() {
+		return completedSieges;
+	}
+
+	public String getAgeName() {
+		return AGE_NAMES[MathHelper.clamp(ageLevel, 0, AGE_NAMES.length - 1)];
+	}
+
+	public int getNextAgeSiegeRequirement() {
+		int nextAge = ageLevel + 1;
+		if (nextAge >= AGE_THRESHOLDS.length) {
+			return -1;
+		}
+
+		return AGE_THRESHOLDS[nextAge];
+	}
+
 	public List<UUID> getAttackerIds() {
 		return List.copyOf(attackerIds);
 	}
@@ -175,7 +199,7 @@ public class SiegeBaseState extends PersistentState {
 		this.countdownTicks = 0;
 		if (rewardProgress && !failed) {
 			this.completedSieges++;
-			this.ageLevel = Math.max(this.ageLevel, 1);
+			this.ageLevel = resolveAgeLevel(this.completedSieges);
 		}
 		this.attackerIds.clear();
 		markDirty();
@@ -225,15 +249,21 @@ public class SiegeBaseState extends PersistentState {
 	}
 
 	public String describe() {
+		int nextRequirement = getNextAgeSiegeRequirement();
+		String nextAgeText = nextRequirement < 0
+			? "max age reached"
+			: nextRequirement + " victories for next age";
 		return String.format(
-			"Current siege base: %s in %s, claimed by %s. Objective HP: %d/%d. Age level: %d. Completed sieges: %d. Siege pending: %s. Siege active: %s. Siege failed: %s. Last wave size: %d.",
+			"Current siege base: %s in %s, claimed by %s. Objective HP: %d/%d. Age: %s (%d). Completed sieges: %d. Progress: %s. Siege pending: %s. Siege active: %s. Siege failed: %s. Last wave size: %d.",
 			basePos.toShortString(),
 			dimensionId,
 			claimedBy,
 			objectiveHealth,
 			MAX_OBJECTIVE_HEALTH,
+			getAgeName(),
 			ageLevel,
 			completedSieges,
+			nextAgeText,
 			siegePending ? "yes" : "no",
 			siegeActive ? "yes" : "no",
 			siegeFailed ? "yes" : "no",
@@ -263,5 +293,15 @@ public class SiegeBaseState extends PersistentState {
 		}
 		nbt.put("attackers", attackerList);
 		return nbt;
+	}
+
+	private static int resolveAgeLevel(int completedSieges) {
+		int resolved = 0;
+		for (int i = 0; i < AGE_THRESHOLDS.length; i++) {
+			if (completedSieges >= AGE_THRESHOLDS[i]) {
+				resolved = i;
+			}
+		}
+		return resolved;
 	}
 }
