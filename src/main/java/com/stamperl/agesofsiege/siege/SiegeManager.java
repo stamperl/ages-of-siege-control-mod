@@ -1,7 +1,6 @@
 package com.stamperl.agesofsiege.siege;
 
 import com.stamperl.agesofsiege.state.SiegeBaseState;
-import net.minecraft.block.Blocks;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
@@ -15,6 +14,7 @@ import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -50,7 +50,7 @@ public final class SiegeManager {
 		}
 
 		BlockPos objectivePos = state.getBasePos();
-		if (!world.getBlockState(objectivePos).isOf(Blocks.WHITE_BANNER)) {
+		if (!isObjectivePresent(world, objectivePos)) {
 			state.handleObjectiveDestroyed(world, objectivePos);
 			return;
 		}
@@ -144,6 +144,10 @@ public final class SiegeManager {
 
 		ServerWorld world = state.getBaseWorld(server);
 		if (world == null) {
+			return false;
+		}
+
+		if (!isObjectivePresent(world, state.getBasePos())) {
 			return false;
 		}
 
@@ -280,5 +284,9 @@ public final class SiegeManager {
 			Text.literal("Current age: " + state.getAgeName() + ". " + progressText),
 			false
 		);
+	}
+
+	private static boolean isObjectivePresent(ServerWorld world, BlockPos objectivePos) {
+		return world.getBlockState(objectivePos).isIn(BlockTags.BANNERS);
 	}
 }
