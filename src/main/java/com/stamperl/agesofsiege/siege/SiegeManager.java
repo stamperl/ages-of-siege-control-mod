@@ -80,6 +80,9 @@ public final class SiegeManager {
 		INFANTRY_BREACH
 	}
 
+	private record InfantryPathResult(boolean reachable, BlockPos startFoot, int explored) {
+	}
+
 	private SiegeManager() {
 	}
 
@@ -632,73 +635,23 @@ public final class SiegeManager {
 		}
 
 		Vec3d objectiveCenter = Vec3d.ofCenter(objectivePos);
-		if (!hasActiveBreachTeam(world, state)) {
-			HostileEntity furthestAttacker = getFurthestAttacker(world, state, objectiveCenter);
-			if (furthestAttacker != null) {
-				boolean openLane = hasClearInfantryAssaultLane(world, furthestAttacker.getPos(), objectiveCenter);
-				BlockPos breachTarget = findBestBreachTarget(world, furthestAttacker.getPos(), objectivePos);
-				boolean canRush = openLane;
-				if (canRush) {
-					if (DEBUG_LOGGING && world.getTime() % 20L == 0L) {
-						AgesOfSiegeMod.LOGGER.info(
-							"[SiegeDebug] no-breach-team attacker={} openLane={} breachTarget={} breachedWalls={} -> RUSH_BANNER",
-							furthestAttacker.getType().getUntranslatedName(),
-							openLane,
-							breachTarget,
-							state.getBreachedWallBlocks()
-						);
-					}
-					return AssaultMode.RUSH_BANNER;
-				}
-				if (DEBUG_LOGGING && world.getTime() % 20L == 0L) {
-					AgesOfSiegeMod.LOGGER.info(
-						"[SiegeDebug] no-breach-team attacker={} openLane={} breachTarget={} breachedWalls={} -> INFANTRY_BREACH",
-						furthestAttacker.getType().getUntranslatedName(),
-						openLane,
-						breachTarget,
-						state.getBreachedWallBlocks()
-					);
-				}
-				return AssaultMode.INFANTRY_BREACH;
-			}
-		}
-
 		HostileEntity furthestBreacher = getFurthestBreacher(world, state, objectiveCenter);
-		boolean breacherOpenLane = furthestBreacher != null && hasClearInfantryAssaultLane(world, furthestBreacher.getPos(), objectiveCenter);
-
 		SiegeRamEntity furthestRam = getFurthestRam(world, state, objectiveCenter);
-		if (furthestRam != null) {
-			BlockPos ramTarget = findBestBreachTarget(world, furthestRam.getPos(), objectivePos);
-			if (ramTarget != null && !breacherOpenLane) {
-				return AssaultMode.SUPPORT_RAM;
-			}
-			return hasClearInfantryAssaultLane(world, furthestRam.getPos(), objectiveCenter)
-				? AssaultMode.RUSH_BANNER
-				: AssaultMode.SUPPORT_RAM;
-		}
-
-		if (furthestBreacher != null) {
-			BlockPos breachTarget = findBestBreachTarget(world, furthestBreacher.getPos(), objectivePos);
-			if (breachTarget != null && !breacherOpenLane) {
-				return AssaultMode.INFANTRY_BREACH;
-			}
-			return breacherOpenLane
-				? AssaultMode.RUSH_BANNER
-				: AssaultMode.INFANTRY_BREACH;
-		}
-
 		HostileEntity furthestAttacker = getFurthestAttacker(world, state, objectiveCenter);
-		if (furthestAttacker != null) {
-			BlockPos breachTarget = findBestBreachTarget(world, furthestAttacker.getPos(), objectivePos);
-			if (breachTarget != null) {
-				return AssaultMode.INFANTRY_BREACH;
-			}
-		return hasClearInfantryAssaultLane(world, furthestAttacker.getPos(), objectiveCenter)
-			? AssaultMode.RUSH_BANNER
-			: AssaultMode.INFANTRY_BREACH;
+		Entity pathLead = furthestBreacher != null ? furthestBreacher : (furthestAttacker != null ? furthestAttacker : furthestRam);
+		if (pathLead == null) {
+			return AssaultMode.RUSH_BANNER;
 		}
 
-		return AssaultMode.RUSH_BANNER;
+		InfantryPathResult pathResult = findInfantryPath(world, pathLead.getPos(), objectiveCenter, ASSAULT_LANE_CHECK_DISTANCE, 2);
+		if (pathResult.reachable()) {
+			logAssaultDecision(world, pathLead, pathResult, furthestRam != null, AssaultMode.RUSH_BANNER);
+			return AssaultMode.RUSH_BANNER;
+		}
+
+		AssaultMode blockedMode = furthestRam != null ? AssaultMode.SUPPORT_RAM : AssaultMode.INFANTRY_BREACH;
+		logAssaultDecision(world, pathLead, pathResult, furthestRam != null, blockedMode);
+		return blockedMode;
 	}
 
 	private static AssaultMode getDefaultAssaultMode(SiegeBaseState state) {
@@ -1288,34 +1241,45 @@ public final class SiegeManager {
 		return true;
 	}
 
-	private static boolean hasClearGroundApproach(ServerWorld world, Vec3d from, Vec3d to) {
-		return hasWalkableLane(world, from, to, PLAYER_CHASE_WALL_CHECK_DEPTH, new double[] {0.0D}, 2);
+	private static void logAssaultDecision(ServerWorld world, Entity pathLead, InfantryPathResult pathResult, boolean hasRam, AssaultMode mode) {
+		if (!DEBUG_LOGGING || world.getTime() % 20L != 0L) {
+			return;
+		}
+		AgesOfSiegeMod.LOGGER.info(
+			"[SiegeDebug] decision lead={} hasRam={} reachable={} explored={} start={} -> {}",
+			pathLead.getType().getUntranslatedName(),
+			hasRam,
+			pathResult.reachable(),
+			pathResult.explored(),
+			pathResult.startFoot(),
+			mode
+		);
 	}
 
-	private static boolean hasClearAssaultLane(ServerWorld world, Vec3d from, Vec3d to) {
-		return hasWalkableLane(world, from, to, Math.sqrt(new Vec3d(to.x - from.x, 0.0D, to.z - from.z).lengthSquared()), LANE_WIDTH_SAMPLES, 3);
+	private static boolean hasClearGroundApproach(ServerWorld world, Vec3d from, Vec3d to) {
+		return findInfantryPath(world, from, to, PLAYER_CHASE_WALL_CHECK_DEPTH, 2).reachable();
 	}
 
 	private static boolean hasClearInfantryAssaultLane(ServerWorld world, Vec3d from, Vec3d to) {
-		return hasWalkableLane(world, from, to, ASSAULT_LANE_CHECK_DISTANCE, INFANTRY_LANE_WIDTH_SAMPLES, 2);
+		return findInfantryPath(world, from, to, ASSAULT_LANE_CHECK_DISTANCE, 2).reachable();
 	}
 
-	private static boolean hasWalkableLane(ServerWorld world, Vec3d from, Vec3d to, double maxDistance, double[] widthSamples, int clearanceHeight) {
+	private static InfantryPathResult findInfantryPath(ServerWorld world, Vec3d from, Vec3d to, double maxDistance, int clearanceHeight) {
 		Vec3d delta = new Vec3d(to.x - from.x, 0.0D, to.z - from.z);
 		if (delta.lengthSquared() < 0.001D) {
-			return true;
+			return new InfantryPathResult(true, BlockPos.ofFloored(from), 0);
 		}
 
 		double distance = Math.min(Math.sqrt(delta.lengthSquared()), maxDistance);
 		if (distance < LANE_CHECK_INITIAL_SKIP) {
-			return true;
+			return new InfantryPathResult(true, BlockPos.ofFloored(from), 0);
 		}
 
 		Vec3d direction = delta.normalize();
 		Vec3d bfsStart = from.add(direction.multiply(LANE_CHECK_INITIAL_SKIP));
 		BlockPos start = getInfantryFootPos(world, bfsStart.x, bfsStart.z);
 		if (!canOccupyInfantryCell(world, start, clearanceHeight)) {
-			return false;
+			return new InfantryPathResult(false, start, 0);
 		}
 
 		ArrayDeque<BlockPos> queue = new ArrayDeque<>();
@@ -1328,7 +1292,7 @@ public final class SiegeManager {
 			BlockPos current = queue.removeFirst();
 			explored++;
 			if (Vec3d.ofBottomCenter(current).squaredDistanceTo(to.x, current.getY(), to.z) <= OBJECTIVE_ATTACK_RANGE * OBJECTIVE_ATTACK_RANGE) {
-				return true;
+				return new InfantryPathResult(true, start, explored);
 			}
 
 			for (int[] offset : new int[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
@@ -1349,11 +1313,14 @@ public final class SiegeManager {
 				if (!canOccupyInfantryCell(world, next, clearanceHeight)) {
 					continue;
 				}
+				if (!canTraverseInfantryStep(world, current, next, clearanceHeight)) {
+					continue;
+				}
 				queue.addLast(next);
 			}
 		}
 
-		return false;
+		return new InfantryPathResult(false, start, explored);
 	}
 
 	private static BlockPos getInfantryFootPos(ServerWorld world, double x, double z) {
@@ -1368,6 +1335,23 @@ public final class SiegeManager {
 		}
 		for (int yOffset = 0; yOffset < clearanceHeight; yOffset++) {
 			if (isMovementObstacle(world, footPos.up(yOffset))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static boolean canTraverseInfantryStep(ServerWorld world, BlockPos from, BlockPos to, int clearanceHeight) {
+		Vec3d fromCenter = Vec3d.ofBottomCenter(from);
+		Vec3d toCenter = Vec3d.ofBottomCenter(to);
+		for (double t : new double[] {0.25D, 0.5D, 0.75D}) {
+			double sampleX = MathHelper.lerp(t, fromCenter.x, toCenter.x);
+			double sampleZ = MathHelper.lerp(t, fromCenter.z, toCenter.z);
+			BlockPos sample = getInfantryFootPos(world, sampleX, sampleZ);
+			if (Math.abs(sample.getY() - from.getY()) > 1 && Math.abs(sample.getY() - to.getY()) > 1) {
+				return false;
+			}
+			if (!canOccupyInfantryCell(world, sample, clearanceHeight)) {
 				return false;
 			}
 		}
