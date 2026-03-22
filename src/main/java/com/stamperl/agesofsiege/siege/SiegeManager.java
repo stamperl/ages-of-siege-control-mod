@@ -90,7 +90,13 @@ public final class SiegeManager {
 	) {
 	}
 
-	private record InfantryPathResult(boolean reachable, BlockPos startFoot, int explored) {
+	private record InfantryPathResult(boolean reachable, BlockPos startFoot, int explored, BlockPos frontierTarget) {
+	}
+
+	private record PathNode(BlockPos pos, int steps) {
+	}
+
+	private record BreachGridPlan(BlockPos anchorBase, Vec3d forward, Vec3d right, List<BlockPos> cells) {
 	}
 
 	private SiegeManager() {
@@ -569,18 +575,21 @@ public final class SiegeManager {
 		BlockPos breachAnchor = decision.primaryBreachTarget() != null
 			? decision.primaryBreachTarget()
 			: findBestRamBreachTarget(world, hostile.getPos(), objectivePos);
-		BlockPos breachTarget = getAssignedBreachFaceTarget(world, breachAnchor, hostile, objectivePos);
+		BreachGridPlan breachPlan = breachAnchor != null ? buildBreachGridPlan(world, breachAnchor, objectivePos) : null;
+		BlockPos breachTarget = getAssignedBreachFaceTarget(breachPlan, hostile);
+		Vec3d breachApproach = getAssignedBreachApproachPosition(world, breachPlan, hostile, breachTarget);
 		if (DEBUG_LOGGING && world.getTime() % 40L == 0L) {
 			AgesOfSiegeMod.LOGGER.info(
-				"[SiegeDebug] breacher={} mode={} breachAnchor={} breachTarget={} pos={}",
+				"[SiegeDebug] breacher={} mode={} breachAnchor={} breachTarget={} breachApproach={} pos={}",
 				hostile.getType().getUntranslatedName(),
 				assaultMode,
 				breachAnchor,
 				breachTarget,
+				breachApproach,
 				hostile.getBlockPos()
 			);
 		}
-		if (breachTarget != null && tryAttackWallTarget(hostile, world, breachTarget, 1, 15)) {
+		if (breachTarget != null && breachApproach != null && tryAttackWallTarget(hostile, world, breachTarget, breachApproach, 1, 15)) {
 			return;
 		}
 
@@ -679,6 +688,9 @@ public final class SiegeManager {
 			? Vec3d.ofCenter(primaryBreachTarget)
 			: pathSource;
 		InfantryPathResult pathResult = findInfantryPath(world, reachabilitySource, objectiveCenter, ASSAULT_LANE_CHECK_DISTANCE, 2);
+		if (!pathResult.reachable() && furthestRam == null && pathResult.frontierTarget() != null) {
+			primaryBreachTarget = getWallBase(pathResult.frontierTarget(), world);
+		}
 		if (pathResult.reachable()) {
 			state.setPrimaryBreachTarget(null);
 		}
@@ -710,61 +722,50 @@ public final class SiegeManager {
 		return next;
 	}
 
-	private static BlockPos getAssignedBreachFaceTarget(ServerWorld world, BlockPos breachAnchor, HostileEntity hostile, BlockPos objectivePos) {
-		if (breachAnchor == null) {
+	private static BlockPos getAssignedBreachFaceTarget(BreachGridPlan plan, HostileEntity hostile) {
+		if (plan == null || plan.cells().isEmpty()) {
 			return null;
 		}
 
-		Vec3d[] axes = getBreachAxes(breachAnchor, objectivePos);
-		Vec3d forward = axes[0];
-		Vec3d right = axes[1];
 		int slot = Math.floorMod(hostile.getUuid().hashCode(), 3) - 1;
-		int baseHeight = getRamWallHeight(world, breachAnchor);
-		int[] lateralPriority = slot == 0 ? new int[] {0, -1, 1, -2, 2} : new int[] {slot, 0, -slot, slot * 2, -slot * 2};
-
-		for (int depth = 0; depth <= 2; depth++) {
-			for (int lateral : lateralPriority) {
-				BlockPos lateralBase = breachAnchor.add(
-					MathHelper.floor(right.x * lateral + forward.x * depth),
-					0,
-					MathHelper.floor(right.z * lateral + forward.z * depth)
-				);
-				for (int yOffset = 0; yOffset <= Math.max(2, baseHeight); yOffset++) {
-					BlockPos candidate = lateralBase.up(yOffset);
-					if (WallTier.from(world.getBlockState(candidate)) != WallTier.NONE) {
-						return candidate.toImmutable();
-					}
-				}
+		BlockPos best = null;
+		double bestScore = Double.MAX_VALUE;
+		Vec3d anchorCenter = Vec3d.ofCenter(plan.anchorBase());
+		for (BlockPos cell : plan.cells()) {
+			Vec3d offset = Vec3d.ofCenter(cell).subtract(anchorCenter);
+			double lateral = offset.dotProduct(plan.right());
+			double depth = offset.dotProduct(plan.forward());
+			double height = cell.getY() - plan.anchorBase().getY();
+			double score = Math.abs(lateral - slot) * 2.0D + depth * 32.0D + height * 3.0D;
+			if (best == null || score < bestScore) {
+				best = cell;
+				bestScore = score;
 			}
 		}
+		return best;
+	}
 
-		return findNearestWallAroundAnchor(world, breachAnchor, objectivePos);
+	private static Vec3d getAssignedBreachApproachPosition(ServerWorld world, BreachGridPlan plan, HostileEntity hostile, BlockPos target) {
+		if (plan == null || target == null) {
+			return null;
+		}
+
+		int slot = Math.floorMod(hostile.getUuid().hashCode(), 3) - 1;
+		Vec3d targetCenter = Vec3d.ofCenter(target);
+		Vec3d baseApproach = targetCenter
+			.subtract(plan.forward().multiply(1.85D))
+			.add(plan.right().multiply(slot * (BREACH_SLOT_RADIUS * 0.8D)));
+		double groundedY = getGroundY(world, baseApproach.x, baseApproach.z);
+		return new Vec3d(baseApproach.x, groundedY, baseApproach.z);
 	}
 
 	private static boolean isBreachZoneActive(ServerWorld world, BlockPos anchorBase, BlockPos objectivePos) {
-		return findNearestWallAroundAnchor(world, anchorBase, objectivePos) != null;
+		return !buildBreachGridPlan(world, anchorBase, objectivePos).cells().isEmpty();
 	}
 
 	private static BlockPos findNearestWallAroundAnchor(ServerWorld world, BlockPos breachAnchor, BlockPos objectivePos) {
-		Vec3d[] axes = getBreachAxes(breachAnchor, objectivePos);
-		Vec3d forward = axes[0];
-		Vec3d right = axes[1];
-		for (int depth = 0; depth <= 3; depth++) {
-			for (int lateral = -2; lateral <= 2; lateral++) {
-				BlockPos base = breachAnchor.add(
-					MathHelper.floor(right.x * lateral + forward.x * depth),
-					0,
-					MathHelper.floor(right.z * lateral + forward.z * depth)
-				);
-				for (int y = 0; y <= 2; y++) {
-					BlockPos candidate = base.up(y);
-					if (WallTier.from(world.getBlockState(candidate)) != WallTier.NONE) {
-						return candidate.toImmutable();
-					}
-				}
-			}
-		}
-		return null;
+		BreachGridPlan plan = buildBreachGridPlan(world, breachAnchor, objectivePos);
+		return plan.cells().isEmpty() ? null : plan.cells().get(0);
 	}
 
 	private static Vec3d[] getBreachAxes(BlockPos breachAnchor, BlockPos objectivePos) {
@@ -777,6 +778,48 @@ public final class SiegeManager {
 		forward = forward.normalize();
 		Vec3d right = new Vec3d(-forward.z, 0.0D, forward.x);
 		return new Vec3d[] {forward, right};
+	}
+
+	private static BreachGridPlan buildBreachGridPlan(ServerWorld world, BlockPos breachAnchor, BlockPos objectivePos) {
+		Vec3d[] axes = getBreachAxes(breachAnchor, objectivePos);
+		Vec3d forward = axes[0];
+		Vec3d right = axes[1];
+		int baseHeight = Math.max(2, getRamWallHeight(world, breachAnchor));
+		List<BlockPos> cells = new ArrayList<>();
+		for (int depth = 0; depth <= 3; depth++) {
+			for (int lateral = -2; lateral <= 2; lateral++) {
+				BlockPos lateralBase = breachAnchor.add(
+					MathHelper.floor(right.x * lateral + forward.x * depth),
+					0,
+					MathHelper.floor(right.z * lateral + forward.z * depth)
+				);
+				for (int yOffset = 0; yOffset <= baseHeight; yOffset++) {
+					BlockPos candidate = lateralBase.up(yOffset);
+					if (WallTier.from(world.getBlockState(candidate)) != WallTier.NONE) {
+						cells.add(candidate.toImmutable());
+					}
+				}
+			}
+		}
+		cells.sort((a, b) -> compareBreachCells(a, b, breachAnchor, forward, right));
+		return new BreachGridPlan(breachAnchor, forward, right, cells);
+	}
+
+	private static int compareBreachCells(BlockPos a, BlockPos b, BlockPos anchorBase, Vec3d forward, Vec3d right) {
+		Vec3d anchorCenter = Vec3d.ofCenter(anchorBase);
+		Vec3d aOffset = Vec3d.ofCenter(a).subtract(anchorCenter);
+		Vec3d bOffset = Vec3d.ofCenter(b).subtract(anchorCenter);
+		double aDepth = aOffset.dotProduct(forward);
+		double bDepth = bOffset.dotProduct(forward);
+		if (aDepth != bDepth) {
+			return Double.compare(aDepth, bDepth);
+		}
+		double aLateral = Math.abs(aOffset.dotProduct(right));
+		double bLateral = Math.abs(bOffset.dotProduct(right));
+		if (aLateral != bLateral) {
+			return Double.compare(aLateral, bLateral);
+		}
+		return Integer.compare(a.getY(), b.getY());
 	}
 
 	private static AssaultMode getDefaultAssaultMode(SiegeBaseState state) {
@@ -1247,16 +1290,19 @@ public final class SiegeManager {
 		return null;
 	}
 
-	private static boolean tryAttackWallTarget(HostileEntity hostile, ServerWorld world, BlockPos target, int damage, int attackIntervalTicks) {
+	private static boolean tryAttackWallTarget(HostileEntity hostile, ServerWorld world, BlockPos target, Vec3d approachPos, int damage, int attackIntervalTicks) {
 		if (WallTier.from(world.getBlockState(target)) == WallTier.NONE) {
 			return false;
 		}
 
 		Vec3d targetCenter = Vec3d.ofCenter(target);
-		Vec3d approachPos = getBreachApproachPosition(world, hostile, target);
 		double targetDistanceSq = hostile.squaredDistanceTo(targetCenter);
 		double approachDistanceSq = hostile.squaredDistanceTo(approachPos);
-		if (targetDistanceSq > BREACH_CHECK_RANGE * BREACH_CHECK_RANGE && approachDistanceSq > 2.25D * 2.25D) {
+		if (approachDistanceSq > 2.75D * 2.75D) {
+			moveInfantryToward(hostile, world, approachPos, 1.0D);
+			return true;
+		}
+		if (targetDistanceSq > BREACH_CHECK_RANGE * BREACH_CHECK_RANGE) {
 			moveInfantryToward(hostile, world, approachPos, 1.0D);
 			return true;
 		}
@@ -1282,7 +1328,8 @@ public final class SiegeManager {
 
 	private static boolean tryFallbackWallAssault(HostileEntity hostile, ServerWorld world, BlockPos objectivePos, int damage, int attackIntervalTicks) {
 		BlockPos breachTarget = findBestBreachTarget(world, hostile.getPos(), objectivePos);
-		return breachTarget != null && tryAttackWallTarget(hostile, world, breachTarget, damage, attackIntervalTicks);
+		return breachTarget != null
+			&& tryAttackWallTarget(hostile, world, breachTarget, getBreachApproachPosition(world, hostile, breachTarget), damage, attackIntervalTicks);
 	}
 
 	private static void advanceOnObjective(HostileEntity hostile, ServerWorld world, BlockPos objectivePos, int objectiveDamage) {
@@ -1371,13 +1418,14 @@ public final class SiegeManager {
 			return;
 		}
 		AgesOfSiegeMod.LOGGER.info(
-			"[SiegeDebug] decision lead={} source={} hasRam={} reachable={} explored={} start={} breachTarget={} -> {}",
+			"[SiegeDebug] decision lead={} source={} hasRam={} reachable={} explored={} start={} frontier={} breachTarget={} -> {}",
 			pathLead.getType().getUntranslatedName(),
 			BlockPos.ofFloored(pathSource),
 			hasRam,
 			pathResult.reachable(),
 			pathResult.explored(),
 			pathResult.startFoot(),
+			pathResult.frontierTarget(),
 			primaryBreachTarget,
 			mode
 		);
@@ -1394,32 +1442,35 @@ public final class SiegeManager {
 	private static InfantryPathResult findInfantryPath(ServerWorld world, Vec3d from, Vec3d to, double maxDistance, int clearanceHeight) {
 		Vec3d delta = new Vec3d(to.x - from.x, 0.0D, to.z - from.z);
 		if (delta.lengthSquared() < 0.001D) {
-			return new InfantryPathResult(true, BlockPos.ofFloored(from), 0);
+			return new InfantryPathResult(true, BlockPos.ofFloored(from), 0, null);
 		}
 
 		double distance = Math.min(Math.sqrt(delta.lengthSquared()), maxDistance);
 		if (distance < LANE_CHECK_INITIAL_SKIP) {
-			return new InfantryPathResult(true, BlockPos.ofFloored(from), 0);
+			return new InfantryPathResult(true, BlockPos.ofFloored(from), 0, null);
 		}
 
 		Vec3d direction = delta.normalize();
 		Vec3d bfsStart = from.add(direction.multiply(LANE_CHECK_INITIAL_SKIP));
 		BlockPos start = getInfantryFootPos(world, bfsStart.x, bfsStart.z);
 		if (!canOccupyInfantryCell(world, start, clearanceHeight)) {
-			return new InfantryPathResult(false, start, 0);
+			return new InfantryPathResult(false, start, 0, findBlockingWallInColumn(world, start, clearanceHeight));
 		}
 
-		ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+		ArrayDeque<PathNode> queue = new ArrayDeque<>();
 		Set<Long> visited = new HashSet<>();
-		queue.add(start);
+		queue.add(new PathNode(start, 0));
 		visited.add(packXZ(start.getX(), start.getZ()));
 		int explored = 0;
+		BlockPos bestFrontier = null;
+		double bestFrontierScore = Double.MAX_VALUE;
 
 		while (!queue.isEmpty() && explored < INFANTRY_PATH_SEARCH_LIMIT) {
-			BlockPos current = queue.removeFirst();
+			PathNode node = queue.removeFirst();
+			BlockPos current = node.pos();
 			explored++;
 			if (Vec3d.ofBottomCenter(current).squaredDistanceTo(to.x, current.getY(), to.z) <= OBJECTIVE_ATTACK_RANGE * OBJECTIVE_ATTACK_RANGE) {
-				return new InfantryPathResult(true, start, explored);
+				return new InfantryPathResult(true, start, explored, bestFrontier);
 			}
 
 			for (int[] offset : new int[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
@@ -1438,16 +1489,61 @@ public final class SiegeManager {
 					continue;
 				}
 				if (!canOccupyInfantryCell(world, next, clearanceHeight)) {
+					bestFrontier = pickBetterFrontier(world, to, bestFrontier, bestFrontierScore, findBlockingWallInColumn(world, next, clearanceHeight), node.steps() + 1);
+					if (bestFrontier != null) {
+						bestFrontierScore = frontierScore(bestFrontier, to, node.steps() + 1);
+					}
 					continue;
 				}
 				if (!canTraverseInfantryStep(world, current, next, clearanceHeight)) {
+					bestFrontier = pickBetterFrontier(world, to, bestFrontier, bestFrontierScore, findBlockingWallBetween(world, current, next, clearanceHeight), node.steps() + 1);
+					if (bestFrontier != null) {
+						bestFrontierScore = frontierScore(bestFrontier, to, node.steps() + 1);
+					}
 					continue;
 				}
-				queue.addLast(next);
+				queue.addLast(new PathNode(next, node.steps() + 1));
 			}
 		}
 
-		return new InfantryPathResult(false, start, explored);
+		return new InfantryPathResult(false, start, explored, bestFrontier);
+	}
+
+	private static BlockPos pickBetterFrontier(ServerWorld world, Vec3d objective, BlockPos currentBest, double currentBestScore, BlockPos candidate, int steps) {
+		if (candidate == null) {
+			return currentBest;
+		}
+		double candidateScore = frontierScore(candidate, objective, steps);
+		return candidateScore < currentBestScore ? candidate : currentBest;
+	}
+
+	private static double frontierScore(BlockPos frontier, Vec3d objective, int steps) {
+		return steps * 10.0D + Vec3d.ofCenter(frontier).squaredDistanceTo(objective);
+	}
+
+	private static BlockPos findBlockingWallInColumn(ServerWorld world, BlockPos footPos, int clearanceHeight) {
+		for (int yOffset = 0; yOffset < Math.max(3, clearanceHeight + 1); yOffset++) {
+			BlockPos candidate = footPos.up(yOffset);
+			if (WallTier.from(world.getBlockState(candidate)) != WallTier.NONE) {
+				return candidate.toImmutable();
+			}
+		}
+		return null;
+	}
+
+	private static BlockPos findBlockingWallBetween(ServerWorld world, BlockPos from, BlockPos to, int clearanceHeight) {
+		Vec3d fromCenter = Vec3d.ofBottomCenter(from);
+		Vec3d toCenter = Vec3d.ofBottomCenter(to);
+		for (double t : new double[] {0.25D, 0.5D, 0.75D}) {
+			double sampleX = MathHelper.lerp(t, fromCenter.x, toCenter.x);
+			double sampleZ = MathHelper.lerp(t, fromCenter.z, toCenter.z);
+			BlockPos sample = getInfantryFootPos(world, sampleX, sampleZ);
+			BlockPos wall = findBlockingWallInColumn(world, sample, clearanceHeight);
+			if (wall != null) {
+				return wall;
+			}
+		}
+		return null;
 	}
 
 	private static BlockPos getInfantryFootPos(ServerWorld world, double x, double z) {
