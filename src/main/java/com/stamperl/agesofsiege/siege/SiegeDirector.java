@@ -119,18 +119,18 @@ public final class SiegeDirector {
 				livingEngines.add(engineId);
 			}
 		}
-		SiegeSession updated = copySession(session, session.getPhase(), session.getPhaseStartedGameTime(), session.getCountdownEndGameTime(), livingAttackers, livingEngines, session.getCurrentPlan(), session.getLastObservation(), session.getLastPlanTick(), session.getFallbackReason());
+		SiegeSession updated = copySession(session, session.getPhase(), session.getPhaseStartedGameTime(), session.getCountdownEndGameTime(), livingAttackers, livingEngines, session.getCurrentPlan(), session.getLastObservation(), session.getLastObservationTick(), session.getLastPlanTick(), session.getFallbackReason());
 		state.setActiveSession(updated);
 		return updated;
 	}
 
 	private static SiegeSession refreshObservationIfNeeded(ServerWorld world, SiegeBaseState state, SiegeSession session, BlockPos objectivePos) {
-		if (session.getLastObservation() != null && world.getTime() - session.getLastPlanTick() < OBSERVATION_INTERVAL) {
+		if (session.getLastObservation() != null && world.getTime() - session.getLastObservationTick() < OBSERVATION_INTERVAL) {
 			return session;
 		}
 		BattlefieldObservation observation = OBSERVATION_SERVICE.observe(world, session, objectivePos);
 		SiegeDebug.logObservation(world, observation, objectivePos);
-		SiegeSession updated = copySession(session, session.getPhase(), session.getPhaseStartedGameTime(), session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), session.getCurrentPlan(), observation, session.getLastPlanTick(), session.getFallbackReason());
+		SiegeSession updated = copySession(session, session.getPhase(), session.getPhaseStartedGameTime(), session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), session.getCurrentPlan(), observation, world.getTime(), session.getLastPlanTick(), session.getFallbackReason());
 		state.setActiveSession(updated);
 		return updated;
 	}
@@ -162,7 +162,7 @@ public final class SiegeDirector {
 		SiegePlan plan = PLANNER.createPlan(world, objectivePos, session.getRallyPos(), observation, !session.getEngineIds().isEmpty());
 		SiegeDebug.logPlan(world, plan, "refresh");
 		String fallbackReason = plan.planType() == SiegePlanType.FALLBACK_PUSH ? "fallback_push" : null;
-		SiegeSession updated = copySession(session, session.getPhase(), session.getPhaseStartedGameTime(), session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), plan, observation, world.getTime(), fallbackReason);
+		SiegeSession updated = copySession(session, session.getPhase(), session.getPhaseStartedGameTime(), session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), plan, observation, session.getLastObservationTick(), world.getTime(), fallbackReason);
 		state.setActiveSession(updated);
 		return updated;
 	}
@@ -210,7 +210,7 @@ public final class SiegeDirector {
 					&& plan.primaryBreachAnchor() != null
 					&& !refreshed.primaryBreachAnchor().equals(plan.primaryBreachAnchor())) {
 					SiegeDebug.logPhaseChange(session, SiegePhase.ADVANCE, now, "breach_lane_replanned");
-					SiegeSession updated = copySession(session, SiegePhase.ADVANCE, now, session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), refreshed, observation, now, null);
+					SiegeSession updated = copySession(session, SiegePhase.ADVANCE, now, session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), refreshed, observation, session.getLastObservationTick(), now, null);
 					state.setActiveSession(updated);
 					return updated;
 				}
@@ -263,7 +263,7 @@ public final class SiegeDirector {
 	}
 
 	private static SiegeSession setPhase(SiegeBaseState state, SiegeSession session, SiegePhase phase, long now) {
-		SiegeSession updated = copySession(session, phase, now, phase == SiegePhase.COUNTDOWN ? session.getCountdownEndGameTime() : session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), session.getCurrentPlan(), session.getLastObservation(), session.getLastPlanTick(), session.getFallbackReason());
+		SiegeSession updated = copySession(session, phase, now, phase == SiegePhase.COUNTDOWN ? session.getCountdownEndGameTime() : session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), session.getCurrentPlan(), session.getLastObservation(), session.getLastObservationTick(), session.getLastPlanTick(), session.getFallbackReason());
 		state.setActiveSession(updated);
 		return updated;
 	}
@@ -298,6 +298,7 @@ public final class SiegeDirector {
 		List<UUID> engines,
 		SiegePlan plan,
 		BattlefieldObservation observation,
+		long lastObservationTick,
 		long lastPlanTick,
 		String fallbackReason
 	) {
@@ -316,6 +317,7 @@ public final class SiegeDirector {
 			session.getRoleAssignments(),
 			plan,
 			observation,
+			lastObservationTick,
 			lastPlanTick,
 			fallbackReason
 		);

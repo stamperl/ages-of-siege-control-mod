@@ -27,6 +27,7 @@ public final class SiegeSession {
 	private final Map<UUID, UnitRole> roleAssignments;
 	private final SiegePlan currentPlan;
 	private final BattlefieldObservation lastObservation;
+	private final long lastObservationTick;
 	private final long lastPlanTick;
 	private final String fallbackReason;
 
@@ -45,6 +46,7 @@ public final class SiegeSession {
 		Map<UUID, UnitRole> roleAssignments,
 		SiegePlan currentPlan,
 		BattlefieldObservation lastObservation,
+		long lastObservationTick,
 		long lastPlanTick,
 		String fallbackReason
 	) {
@@ -62,6 +64,7 @@ public final class SiegeSession {
 		this.roleAssignments = Map.copyOf(roleAssignments);
 		this.currentPlan = currentPlan;
 		this.lastObservation = lastObservation;
+		this.lastObservationTick = lastObservationTick;
 		this.lastPlanTick = lastPlanTick;
 		this.fallbackReason = fallbackReason;
 	}
@@ -122,6 +125,10 @@ public final class SiegeSession {
 		return lastObservation;
 	}
 
+	public long getLastObservationTick() {
+		return lastObservationTick;
+	}
+
 	public long getLastPlanTick() {
 		return lastPlanTick;
 	}
@@ -150,6 +157,7 @@ public final class SiegeSession {
 		if (lastObservation != null) {
 			nbt.put("lastObservation", lastObservation.toNbt());
 		}
+		nbt.putLong("lastObservationTick", lastObservationTick);
 		nbt.putLong("lastPlanTick", lastPlanTick);
 		if (fallbackReason != null) {
 			nbt.putString("fallbackReason", fallbackReason);
@@ -175,6 +183,7 @@ public final class SiegeSession {
 			nbt.contains("lastObservation", NbtElement.COMPOUND_TYPE)
 				? BattlefieldObservation.fromNbt(nbt.getCompound("lastObservation"))
 				: null,
+			nbt.getLong("lastObservationTick"),
 			nbt.getLong("lastPlanTick"),
 			nbt.contains("fallbackReason", NbtElement.STRING_TYPE) ? nbt.getString("fallbackReason") : null
 		);

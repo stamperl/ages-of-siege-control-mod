@@ -19,7 +19,7 @@ import java.util.Set;
 public final class SiegePlanner {
 	private static final long PLAN_TTL_TICKS = 100L;
 	private static final double[] LANE_OFFSETS = {-6.0D, -4.0D, -2.0D, 0.0D, 2.0D, 4.0D, 6.0D};
-	private static final double[] LANE_WIDTH_SAMPLES = {-0.75D, 0.0D, 0.75D};
+	private static final double[] LANE_WIDTH_SAMPLES = {-1.25D, -0.5D, 0.0D, 0.5D, 1.25D};
 	private final BattlefieldObservationService observationService = new BattlefieldObservationService();
 
 	private record RouteCandidate(
@@ -249,10 +249,6 @@ public final class SiegePlanner {
 					}
 					lastBlocking = normalized;
 					foundBlockingAtStep = true;
-					break;
-				}
-				if (foundBlockingAtStep) {
-					break;
 				}
 			}
 			if (foundBlockingAtStep) {
@@ -272,15 +268,17 @@ public final class SiegePlanner {
 		List<BlockPos> targets = List.copyOf(blockingCells);
 		BlockPos staging = stagingPoint(rallyPos, firstBlocking);
 		BlockPos breachExit = findLaneExit(world, objectivePos, start, forward, right, laneOffset, lastBlocking);
-		boolean traversableAfterBreach = breachExit != null;
-		double score = routeScore(world, rallyPos, objectivePos, targets, firstBlocking, breachExit, laneOffset, barrierCount, traversableAfterBreach);
+		int remainingBarrierCount = breachExit == null ? 0 : countBarrierSegmentsAlongLane(world, breachExit, objectivePos);
+		int totalBarrierCount = barrierCount + remainingBarrierCount;
+		boolean traversableAfterBreach = breachExit != null && remainingBarrierCount == 0;
+		double score = routeScore(world, rallyPos, objectivePos, targets, firstBlocking, breachExit, laneOffset, totalBarrierCount, traversableAfterBreach);
 		return new RouteCandidate(
 			laneOffset,
 			staging,
 			firstBlocking,
 			breachExit,
 			targets,
-			barrierCount,
+			totalBarrierCount,
 			traversableAfterBreach,
 			score
 		);
@@ -327,5 +325,48 @@ public final class SiegePlanner {
 		double barrierPenalty = Math.max(0, barrierCount - 1) * 35.0D;
 		double deadEndPenalty = traversableAfterBreach ? 0.0D : 1000.0D;
 		return hpCost + approachDistancePenalty + postBreachPenalty + lanePenalty + blockCountPenalty + barrierPenalty + deadEndPenalty;
+	}
+
+	private int countBarrierSegmentsAlongLane(ServerWorld world, BlockPos from, BlockPos to) {
+		Vec3d start = Vec3d.ofCenter(from);
+		Vec3d end = Vec3d.ofCenter(to);
+		Vec3d delta = end.subtract(start);
+		double length = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+		if (length < 0.001D) {
+			return 0;
+		}
+
+		Vec3d forward = new Vec3d(delta.x / length, 0.0D, delta.z / length);
+		Vec3d right = new Vec3d(-forward.z, 0.0D, forward.x);
+		int barriers = 0;
+		boolean inBarrier = false;
+
+		for (double step = 0.5D; step < length; step += 0.5D) {
+			Vec3d center = start.add(forward.multiply(step));
+			boolean foundBlockingAtStep = false;
+			for (double widthSample : LANE_WIDTH_SAMPLES) {
+				Vec3d sample = center.add(right.multiply(widthSample));
+				BlockPos base = BlockPos.ofFloored(sample.x, to.getY(), sample.z);
+				for (int yOffset = 0; yOffset <= 2; yOffset++) {
+					if (WallTier.from(world.getBlockState(base.up(yOffset))) != WallTier.NONE) {
+						foundBlockingAtStep = true;
+						break;
+					}
+				}
+				if (foundBlockingAtStep) {
+					break;
+				}
+			}
+			if (foundBlockingAtStep) {
+				if (!inBarrier) {
+					barriers++;
+					inBarrier = true;
+				}
+			} else {
+				inBarrier = false;
+			}
+		}
+
+		return barriers;
 	}
 }

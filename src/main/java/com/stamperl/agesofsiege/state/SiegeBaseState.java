@@ -155,6 +155,7 @@ public class SiegeBaseState extends PersistentState {
 			legacyPlan,
 			null,
 			0L,
+			0L,
 			null
 		);
 	}
@@ -304,6 +305,7 @@ public class SiegeBaseState extends PersistentState {
 			session.getRoleAssignments(),
 			session.getCurrentPlan(),
 			session.getLastObservation(),
+			session.getLastObservationTick(),
 			session.getLastPlanTick(),
 			session.getFallbackReason()
 		));
@@ -368,6 +370,7 @@ public class SiegeBaseState extends PersistentState {
 			session.getRoleAssignments(),
 			nextPlan,
 			session.getLastObservation(),
+			session.getLastObservationTick(),
 			session.getLastPlanTick(),
 			session.getFallbackReason()
 		));
@@ -452,6 +455,7 @@ public class SiegeBaseState extends PersistentState {
 			session.getRoleAssignments(),
 			session.getCurrentPlan(),
 			session.getLastObservation(),
+			session.getLastObservationTick(),
 			session.getLastPlanTick(),
 			session.getFallbackReason()
 		));
@@ -477,6 +481,7 @@ public class SiegeBaseState extends PersistentState {
 			session.getRoleAssignments(),
 			session.getCurrentPlan(),
 			session.getLastObservation(),
+			session.getLastObservationTick(),
 			session.getLastPlanTick(),
 			session.getFallbackReason()
 		));
@@ -525,6 +530,7 @@ public class SiegeBaseState extends PersistentState {
 			null,
 			null,
 			0L,
+			0L,
 			null
 		);
 		server.getPlayerManager().broadcast(
@@ -555,6 +561,7 @@ public class SiegeBaseState extends PersistentState {
 			activeSession.getRoleAssignments(),
 			activeSession.getCurrentPlan(),
 			activeSession.getLastObservation(),
+			activeSession.getLastObservationTick(),
 			activeSession.getLastPlanTick(),
 			activeSession.getFallbackReason()
 		);
@@ -586,6 +593,7 @@ public class SiegeBaseState extends PersistentState {
 			roleAssignments,
 			session.getCurrentPlan(),
 			session.getLastObservation(),
+			session.getLastObservationTick(),
 			session.getLastPlanTick(),
 			session.getFallbackReason()
 		));
@@ -610,6 +618,7 @@ public class SiegeBaseState extends PersistentState {
 			Map.of(),
 			null,
 			null,
+			0L,
 			0L,
 			null
 		);
@@ -643,6 +652,7 @@ public class SiegeBaseState extends PersistentState {
 			activeSession.getRoleAssignments(),
 			activeSession.getCurrentPlan(),
 			activeSession.getLastObservation(),
+			activeSession.getLastObservationTick(),
 			activeSession.getLastPlanTick(),
 			activeSession.getFallbackReason()
 		);
@@ -768,6 +778,7 @@ public class SiegeBaseState extends PersistentState {
 			session.getRoleAssignments(),
 			session.getCurrentPlan(),
 			session.getLastObservation(),
+			session.getLastObservationTick(),
 			session.getLastPlanTick(),
 			session.getFallbackReason()
 		));
