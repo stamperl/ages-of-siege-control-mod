@@ -1,6 +1,5 @@
 package com.stamperl.agesofsiege.siege.service;
 
-import com.stamperl.agesofsiege.siege.SiegeDebug;
 import com.stamperl.agesofsiege.siege.runtime.SiegeSession;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.minecraft.registry.tag.BlockTags;
@@ -17,14 +16,10 @@ public final class ObjectiveService {
 
 	public void damageObjective(ServerWorld world, SiegeBaseState state, SiegeSession session, int amount) {
 		if (!state.hasBase()) {
-			SiegeDebug.log("damageObjective skipped no_base amount={}", amount);
 			return;
 		}
-
-		SiegeDebug.log("damageObjective apply amount={} hpBefore={} phase={} objective={}", amount, state.getObjectiveHealth(), session == null ? null : session.getPhase(), state.getBasePos());
 		state.setObjectiveHealthValue(Math.max(0, state.getObjectiveHealth() - amount));
 		if (state.getObjectiveHealth() == 0) {
-			SiegeDebug.log("damageObjective objective_destroyed objective={}", state.getBasePos());
 			world.breakBlock(state.getBasePos(), false);
 			handleObjectiveDestroyed(world, state, session, state.getBasePos());
 			return;
@@ -37,7 +32,6 @@ public final class ObjectiveService {
 			);
 		}
 
-		SiegeDebug.log("damageObjective complete hpAfter={}", state.getObjectiveHealth());
 		state.markDirty();
 	}
 

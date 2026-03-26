@@ -1,6 +1,5 @@
 package com.stamperl.agesofsiege.siege.service;
 
-import com.stamperl.agesofsiege.siege.SiegeDebug;
 import com.stamperl.agesofsiege.siege.WallTier;
 import com.stamperl.agesofsiege.siege.runtime.BattlefieldObservation;
 import com.stamperl.agesofsiege.siege.runtime.SiegePlan;
@@ -41,16 +40,12 @@ public final class SiegePlanner {
 
 	public SiegePlan createPlan(ServerWorld world, BlockPos objectivePos, BlockPos rallyPos, BattlefieldObservation observation, boolean hasRam) {
 		if (rallyPos == null || objectivePos == null) {
-			SiegePlan fallback = fallbackPlan(world, objectivePos, observation, "missing_positions");
-			SiegeDebug.logPlan(world, fallback, "missing_positions");
-			return fallback;
+			return fallbackPlan(world, objectivePos, observation, "missing_positions");
 		}
 
 		PathResult path = findCheapestConePath(world, rallyPos, objectivePos);
 		if (path == null || path.cells().isEmpty()) {
-			SiegePlan fallback = fallbackPlan(world, objectivePos, observation, hasRam ? "cone_search_failed_with_ram" : "cone_search_failed");
-			SiegeDebug.logPlan(world, fallback, "fallback");
-			return fallback;
+			return fallbackPlan(world, objectivePos, observation, hasRam ? "cone_search_failed_with_ram" : "cone_search_failed");
 		}
 
 		BreachSegment firstSegment = firstBreachSegment(world, rallyPos, objectivePos, path);
@@ -68,12 +63,6 @@ public final class SiegePlanner {
 				1.0F,
 				world.getTime() + PLAN_TTL_TICKS
 			);
-			SiegeDebug.log(
-				"cone_route totalCost={} cells={} type=direct_rush",
-				path.cost(),
-				path.cells().size()
-			);
-			SiegeDebug.logPlan(world, plan, "cone_direct");
 			return plan;
 		}
 
@@ -90,16 +79,6 @@ public final class SiegePlanner {
 			0.9F,
 			world.getTime() + PLAN_TTL_TICKS
 		);
-		SiegeDebug.log(
-			"cone_route totalCost={} cells={} firstLayerBlocks={} remainingWalls={} anchor={} exit={}",
-			path.cost(),
-			path.cells().size(),
-			firstSegment.targetBlocks().size(),
-			firstSegment.remainingWallCount(),
-			firstSegment.anchor(),
-			firstSegment.exit()
-		);
-		SiegeDebug.logPlan(world, plan, "cone_layered");
 		return plan;
 	}
 

@@ -1,7 +1,6 @@
 package com.stamperl.agesofsiege.siege.service;
 
 import com.stamperl.agesofsiege.entity.SiegeRamEntity;
-import com.stamperl.agesofsiege.siege.SiegeDebug;
 import com.stamperl.agesofsiege.siege.WallTier;
 import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
 import com.stamperl.agesofsiege.siege.runtime.SiegePlan;
@@ -35,9 +34,6 @@ public final class SiegeUnitController {
 
 	public void dispatch(ServerWorld world, SiegeBaseState state, SiegeSession session) {
 		if (session.getPhase() == SiegePhase.COUNTDOWN) {
-			if (world.getTime() % 20L == 0L) {
-				SiegeDebug.log("dispatch countdown_hold tick={} attackers={} engines={} anchor={}", world.getTime(), session.getAttackerIds().size(), session.getEngineIds().size(), session.getSpawnCenter() == null ? session.getRallyPos() : session.getSpawnCenter());
-			}
 			holdAtRally(world, session);
 			return;
 		}
@@ -193,18 +189,13 @@ public final class SiegeUnitController {
 	private void attackObjective(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, BlockPos objectivePos) {
 		Vec3d objective = Vec3d.ofCenter(objectivePos);
 		if (hostile.squaredDistanceTo(objective) > OBJECTIVE_ATTACK_RANGE * OBJECTIVE_ATTACK_RANGE) {
-			if (world.getTime() % 40L == 0L) {
-				SiegeDebug.log("objective_out_of_range entity={} rolePhase={} pos={} objective={} distSq={}", hostile.getType().getUntranslatedName(), session.getPhase(), hostile.getBlockPos(), objectivePos, hostile.squaredDistanceTo(objective));
-			}
 			moveToward(hostile, world, objective, 1.0D);
 			return;
 		}
 		hostile.getNavigation().stop();
 		hostile.swingHand(Hand.MAIN_HAND);
 		if (world.getTime() % 10L == 0L) {
-			SiegeDebug.log("objective_damage_attempt entity={} phase={} pos={} objective={} hpBefore={}", hostile.getType().getUntranslatedName(), session.getPhase(), hostile.getBlockPos(), objectivePos, state.getObjectiveHealth());
 			objectiveService.damageObjective(world, state, session, 1);
-			SiegeDebug.log("objective_damage_result hpAfter={}", state.getObjectiveHealth());
 		}
 	}
 
@@ -243,9 +234,6 @@ public final class SiegeUnitController {
 			if (entity instanceof HostileEntity hostile && hostile.isAlive()) {
 				hostile.setTarget(null);
 				if (hostile.squaredDistanceTo(anchor) > 25.0D) {
-					if (world.getTime() % 40L == 0L) {
-						SiegeDebug.log("countdown_reposition entity={} pos={} anchor={}", hostile.getType().getUntranslatedName(), hostile.getBlockPos(), BlockPos.ofFloored(anchor));
-					}
 					moveToward(hostile, world, anchor, 1.0D);
 				} else {
 					hostile.getNavigation().stop();
@@ -265,9 +253,6 @@ public final class SiegeUnitController {
 		Vec3d anchor = Vec3d.ofCenter(session.getSpawnCenter() == null ? session.getRallyPos() : session.getSpawnCenter());
 		hostile.setTarget(null);
 		if (hostile.squaredDistanceTo(anchor) > 16.0D) {
-			if (world.getTime() % 40L == 0L) {
-				SiegeDebug.log("form_up_move entity={} pos={} anchor={}", hostile.getType().getUntranslatedName(), hostile.getBlockPos(), BlockPos.ofFloored(anchor));
-			}
 			moveToward(hostile, world, anchor, 1.0D);
 		} else {
 			hostile.getNavigation().stop();

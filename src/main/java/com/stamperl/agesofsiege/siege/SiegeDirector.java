@@ -46,27 +46,22 @@ public final class SiegeDirector {
 
 	public static boolean startSiege(MinecraftServer server, SiegeBaseState state) {
 		if (!state.hasBase() || state.getActiveSession() != null) {
-			SiegeDebug.log("startSiege rejected hasBase={} activeSession={}", state.hasBase(), state.getActiveSession() != null);
 			return false;
 		}
 		ServerWorld world = state.getBaseWorld(server);
 		if (world == null) {
-			SiegeDebug.log("startSiege rejected world_missing dimension={}", state.getDimensionId());
 			return false;
 		}
 		if (!OBJECTIVE_SERVICE.isObjectivePresent(world, null, state.getBasePos())) {
-			SiegeDebug.log("startSiege rejected objective_missing pos={}", state.getBasePos());
 			return false;
 		}
 		BlockPos rally = state.getRallyPoint();
 		if (rally == null || !isRallyMarkerPresent(world, rally)) {
-			SiegeDebug.log("startSiege rejected rally_missing rally={} present={}", rally, rally != null && isRallyMarkerPresent(world, rally));
 			return false;
 		}
 
 		state.beginCountdown(server, 10);
 		SPAWNER.spawnWave(server, world, state, state.getActiveSession());
-		SiegeDebug.log("startSiege accepted objective={} rally={} sessionPhase={}", state.getBasePos(), rally, state.getActiveSession() == null ? null : state.getActiveSession().getPhase());
 		return true;
 	}
 
@@ -79,14 +74,12 @@ public final class SiegeDirector {
 
 		ServerWorld world = state.getBaseWorld(server);
 		if (world == null) {
-			SiegeDebug.log("tick abort world_missing activeSession=true");
 			state.endSiege(true, false);
 			return;
 		}
 
 		BlockPos objectivePos = session.getObjectivePos() == null ? state.getBasePos() : session.getObjectivePos();
 		if (!OBJECTIVE_SERVICE.isObjectivePresent(world, session, objectivePos)) {
-			SiegeDebug.log("tick objective_missing pos={} phase={}", objectivePos, session.getPhase());
 			transitionToDefeat(world, state, "The Settlement Standard was destroyed. The siege is lost.");
 			return;
 		}
@@ -133,7 +126,6 @@ public final class SiegeDirector {
 			return session;
 		}
 		BattlefieldObservation observation = OBSERVATION_SERVICE.observe(world, session, objectivePos);
-		SiegeDebug.logObservation(world, observation, objectivePos);
 		SiegeSession updated = copySession(session, session.getPhase(), session.getPhaseStartedGameTime(), session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), session.getCurrentPlan(), observation, world.getTime(), session.getLastPlanTick(), session.getFallbackReason());
 		state.setActiveSession(updated);
 		return updated;
@@ -164,7 +156,6 @@ public final class SiegeDirector {
 			? OBSERVATION_SERVICE.observe(world, session, objectivePos)
 			: session.getLastObservation();
 		SiegePlan plan = PLANNER.createPlan(world, objectivePos, session.getRallyPos(), observation, !session.getEngineIds().isEmpty());
-		SiegeDebug.logPlan(world, plan, "refresh");
 		String fallbackReason = plan.planType() == SiegePlanType.FALLBACK_PUSH ? "fallback_push" : null;
 		SiegeSession updated = copySession(session, session.getPhase(), session.getPhaseStartedGameTime(), session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), plan, observation, session.getLastObservationTick(), world.getTime(), fallbackReason);
 		state.setActiveSession(updated);
@@ -178,26 +169,21 @@ public final class SiegeDirector {
 		BattlefieldObservation observation = session.getLastObservation();
 
 		if (phase == SiegePhase.COUNTDOWN && now >= session.getCountdownEndGameTime()) {
-			SiegeDebug.logPhaseChange(session, SiegePhase.FORM_UP, now, "countdown_expired");
 			return setPhase(state, session, SiegePhase.FORM_UP, now);
 		}
 		if (phase == SiegePhase.FORM_UP && (enoughNear(session.getAttackerIds(), world, session.getSpawnCenter(), 8.0D, 0.5D) || now - session.getPhaseStartedGameTime() >= 60L)) {
-			SiegeDebug.logPhaseChange(session, SiegePhase.ADVANCE, now, "formed_up");
 			return setPhase(state, session, SiegePhase.ADVANCE, now);
 		}
 		if (phase == SiegePhase.ADVANCE && plan != null) {
 			if (plan.planType() == SiegePlanType.DIRECT_RUSH) {
-				SiegeDebug.logPhaseChange(session, SiegePhase.RUSH, now, "direct_rush_plan");
 				return setPhase(state, session, SiegePhase.RUSH, now);
 			}
 			if (plan.planType() == SiegePlanType.BREACH_REQUIRED && nearStaging(session, world, plan)) {
-				SiegeDebug.logPhaseChange(session, SiegePhase.BREACH, now, "breach_plan_ready");
 				return setPhase(state, session, SiegePhase.BREACH, now);
 			}
 		}
 		if (phase == SiegePhase.BREACH && plan != null) {
 			if (PLANNER.isOpeningUsable(world, plan, objectivePos)) {
-				SiegeDebug.logPhaseChange(session, SiegePhase.RUSH, now, "opening_confirmed");
 				return setPhase(state, session, SiegePhase.RUSH, now);
 			}
 			if (plan.planType() == SiegePlanType.BREACH_REQUIRED
@@ -205,7 +191,6 @@ public final class SiegeDirector {
 				&& !PLANNER.hasActionableTargets(world, plan)
 				&& now - session.getLastPlanTick() >= BREACH_REPLAN_COOLDOWN) {
 				SiegePlan refreshed = PLANNER.createPlan(world, objectivePos, session.getRallyPos(), observation, !session.getEngineIds().isEmpty());
-				SiegeDebug.logPlan(world, refreshed, "breach_recheck");
 				if (PLANNER.isPlanInvalid(world, refreshed)) {
 					return session;
 				}
@@ -213,7 +198,6 @@ public final class SiegeDirector {
 					&& refreshed.primaryBreachAnchor() != null
 					&& plan.primaryBreachAnchor() != null
 					&& !refreshed.primaryBreachAnchor().equals(plan.primaryBreachAnchor())) {
-					SiegeDebug.logPhaseChange(session, SiegePhase.ADVANCE, now, "breach_lane_replanned");
 					SiegeSession updated = copySession(session, SiegePhase.ADVANCE, now, session.getCountdownEndGameTime(), session.getAttackerIds(), session.getEngineIds(), refreshed, observation, session.getLastObservationTick(), now, null);
 					state.setActiveSession(updated);
 					return updated;
@@ -225,12 +209,10 @@ public final class SiegeDirector {
 
 	private static void resolveOutcome(ServerWorld world, MinecraftServer server, SiegeBaseState state, SiegeSession session, BlockPos objectivePos) {
 		if (!OBJECTIVE_SERVICE.isObjectivePresent(world, session, objectivePos)) {
-			SiegeDebug.log("resolveOutcome objective_missing pos={} phase={}", objectivePos, session.getPhase());
 			transitionToDefeat(world, state, "The Settlement Standard was destroyed. The siege is lost.");
 			return;
 		}
 		if (session.getAttackerIds().isEmpty() && session.getEngineIds().isEmpty()) {
-			SiegeDebug.log("resolveOutcome victory phase={} objective={} age={} completedSieges={}", session.getPhase(), objectivePos, state.getAgeLevel(), state.getCompletedSieges());
 			int previousAge = state.getAgeLevel();
 			REWARDS.dropVictoryRewards(world, session, objectivePos, state.getAgeLevel());
 			state.endSiege(false, true);
@@ -259,7 +241,6 @@ public final class SiegeDirector {
 	}
 
 	private static void transitionToDefeat(ServerWorld world, SiegeBaseState state, String message) {
-		SiegeDebug.log("defeat message={} attackers={} engines={}", message, state.getAttackerIds().size(), state.getRamIds().size());
 		SPAWNER.despawnAttackers(world, state.getAttackerIds());
 		SPAWNER.despawnRams(world, state.getRamIds());
 		state.endSiege(true, false);
