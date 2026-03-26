@@ -48,6 +48,7 @@ public class SiegeBaseState extends PersistentState {
 	private BlockPos assaultOrigin;
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
 	private final Map<Long, Integer> wallHealth = new HashMap<>();
+	private final List<PlacedDefender> placedDefenders = new ArrayList<>();
 	private SiegeSession activeSession;
 
 	// Temporary compatibility shims until the old SiegeManager is replaced by SiegeDirector.
@@ -92,6 +93,10 @@ public class SiegeBaseState extends PersistentState {
 		for (NbtElement element : wallList) {
 			NbtCompound entry = (NbtCompound) element;
 			state.wallHealth.put(entry.getLong("pos"), entry.getInt("hp"));
+		}
+		NbtList defenderList = nbt.getList("placedDefenders", NbtElement.COMPOUND_TYPE);
+		for (NbtElement element : defenderList) {
+			state.placedDefenders.add(PlacedDefender.fromNbt((NbtCompound) element));
 		}
 
 		if (nbt.contains("activeSession", NbtElement.COMPOUND_TYPE)) {
@@ -714,6 +719,22 @@ public class SiegeBaseState extends PersistentState {
 		);
 	}
 
+	public String describeDefenders() {
+		if (placedDefenders.isEmpty()) {
+			return "Bound defenders: none.";
+		}
+
+		int archers = 0;
+		int soldiers = 0;
+		for (PlacedDefender defender : placedDefenders) {
+			switch (defender.role()) {
+				case ARCHER -> archers++;
+				case SOLDIER -> soldiers++;
+			}
+		}
+		return "Bound defenders: " + placedDefenders.size() + " total (" + archers + " archers, " + soldiers + " soldiers).";
+	}
+
 	@Override
 	public NbtCompound writeNbt(NbtCompound nbt) {
 		nbt.putBoolean("hasBase", hasBase);
@@ -747,6 +768,11 @@ public class SiegeBaseState extends PersistentState {
 			wallList.add(wallEntry);
 		}
 		nbt.put("wallHealth", wallList);
+		NbtList defenderList = new NbtList();
+		for (PlacedDefender defender : placedDefenders) {
+			defenderList.add(defender.toNbt());
+		}
+		nbt.put("placedDefenders", defenderList);
 		return nbt;
 	}
 
@@ -823,5 +849,40 @@ public class SiegeBaseState extends PersistentState {
 
 	public void incrementBreachedWallBlocks() {
 		breachedWallBlocksCompat++;
+	}
+
+	public List<PlacedDefender> getPlacedDefenders() {
+		return List.copyOf(placedDefenders);
+	}
+
+	public boolean hasDefenderAt(String placementDimensionId, BlockPos pos) {
+		for (PlacedDefender defender : placedDefenders) {
+			if (defender.dimensionId().equals(placementDimensionId) && defender.homePost().equals(pos)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public void addPlacedDefender(PlacedDefender defender) {
+		placedDefenders.add(defender);
+		markDirty();
+	}
+
+	public PlacedDefender getPlacedDefender(UUID entityUuid) {
+		for (PlacedDefender defender : placedDefenders) {
+			if (defender.entityUuid().equals(entityUuid)) {
+				return defender;
+			}
+		}
+		return null;
+	}
+
+	public boolean removePlacedDefender(UUID entityUuid) {
+		boolean removed = placedDefenders.removeIf(defender -> defender.entityUuid().equals(entityUuid));
+		if (removed) {
+			markDirty();
+		}
+		return removed;
 	}
 }

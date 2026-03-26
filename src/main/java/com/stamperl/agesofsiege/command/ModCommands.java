@@ -3,12 +3,16 @@ package com.stamperl.agesofsiege.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.stamperl.agesofsiege.item.ModItems;
+import com.stamperl.agesofsiege.defense.DefenderSpawnerService;
 import com.stamperl.agesofsiege.siege.BlockHpExporter;
 import com.stamperl.agesofsiege.siege.ItemRegistryExporter;
 import com.stamperl.agesofsiege.siege.SiegeDebug;
 import com.stamperl.agesofsiege.siege.SiegeDirector;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.minecraft.item.ItemStack;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -16,6 +20,8 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 
 public final class ModCommands {
+	private static final DefenderSpawnerService DEFENDER_SPAWNER = new DefenderSpawnerService();
+
 	private ModCommands() {
 	}
 
@@ -47,6 +53,18 @@ public final class ModCommands {
 						context.getSource().getPlayerOrThrow(),
 						BoolArgumentType.getBool(context, "enabled")
 					))))
+			.then(CommandManager.literal("spawndefenders")
+				.requires(source -> source.hasPermissionLevel(2))
+				.then(CommandManager.argument("role", StringArgumentType.word())
+					.then(CommandManager.argument("count", IntegerArgumentType.integer(1, 16))
+						.executes(context -> spawnDefenders(
+							context.getSource().getPlayerOrThrow(),
+							StringArgumentType.getString(context, "role"),
+							IntegerArgumentType.getInteger(context, "count")
+						)))))
+			.then(CommandManager.literal("devtokens")
+				.requires(source -> source.hasPermissionLevel(2))
+				.executes(context -> giveDevTokens(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("endsiege")
 				.executes(context -> endSiege(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("dumpblocks")
@@ -73,6 +91,7 @@ public final class ModCommands {
 		}
 
 		player.sendMessage(Text.literal(state.describe()).formatted(Formatting.GREEN), false);
+		player.sendMessage(Text.literal(state.describeDefenders()).formatted(Formatting.AQUA), false);
 		return 1;
 	}
 
@@ -138,6 +157,18 @@ public final class ModCommands {
 				.formatted(enabled ? Formatting.GREEN : Formatting.YELLOW),
 			false
 		);
+		return 1;
+	}
+
+	private static int spawnDefenders(ServerPlayerEntity player, String role, int count) {
+		return DEFENDER_SPAWNER.spawnDefenders(player, role, count);
+	}
+
+	private static int giveDevTokens(ServerPlayerEntity player) {
+		player.giveItemStack(new ItemStack(ModItems.ARCHER_TOKEN, 8));
+		player.giveItemStack(new ItemStack(ModItems.SOLDIER_TOKEN, 8));
+		player.giveItemStack(new ItemStack(ModItems.DEFENDER_RECALL_TOOL));
+		player.sendMessage(Text.literal("Granted 8 Archer Tokens, 8 Soldier Tokens, and a Defender Recall Tool.").formatted(Formatting.GREEN), false);
 		return 1;
 	}
 

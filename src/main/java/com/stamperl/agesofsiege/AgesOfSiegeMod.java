@@ -1,6 +1,7 @@
 package com.stamperl.agesofsiege;
 
 import com.stamperl.agesofsiege.command.ModCommands;
+import com.stamperl.agesofsiege.defense.DefenderRuntimeService;
 import com.stamperl.agesofsiege.entity.ModEntities;
 import com.stamperl.agesofsiege.item.ModItems;
 import com.stamperl.agesofsiege.siege.SiegeDirector;
@@ -17,6 +18,7 @@ public class AgesOfSiegeMod implements ModInitializer {
 		ModEntities.register();
 		ModItems.register();
 		ModCommands.register();
+		DefenderRuntimeService.register();
 		SiegeDirector.register();
 		LOGGER.info("Ages Of Siege control layer loaded.");
 	}

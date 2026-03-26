@@ -52,7 +52,7 @@ public final class ObjectiveService {
 
 		state.clearBase();
 		world.getServer().getPlayerManager().broadcast(
-			Text.literal("The Settlement Standard was destroyed. This base is no longer claimed."),
+			Text.literal("The Settlement Standard was destroyed. This base is no longer claimed, but placed defenders remain bound to their owner and posts."),
 			false
 		);
 	}

@@ -2,5 +2,8 @@
   "entity.ages_of_siege.siege_ram": "Battering Ram",
   "block.ages_of_siege.settlement_standard": "Settlement Standard",
   "item.ages_of_siege.settlement_standard": "Settlement Standard",
-  "item.ages_of_siege.raid_rally_banner": "Raid Rally Banner"
+  "item.ages_of_siege.raid_rally_banner": "Raid Rally Banner",
+  "item.ages_of_siege.archer_token": "Archer Token",
+  "item.ages_of_siege.soldier_token": "Soldier Token",
+  "item.ages_of_siege.defender_recall_tool": "Defender Recall Tool"
 }
