@@ -1,9 +1,11 @@
 package com.stamperl.agesofsiege.command;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.stamperl.agesofsiege.siege.BlockHpExporter;
 import com.stamperl.agesofsiege.siege.ItemRegistryExporter;
+import com.stamperl.agesofsiege.siege.SiegeDebug;
 import com.stamperl.agesofsiege.siege.SiegeDirector;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -38,6 +40,13 @@ public final class ModCommands {
 					))))
 			.then(CommandManager.literal("startsiege")
 				.executes(context -> startSiege(context.getSource().getPlayerOrThrow())))
+			.then(CommandManager.literal("debugpath")
+				.requires(source -> source.hasPermissionLevel(2))
+				.then(CommandManager.argument("enabled", BoolArgumentType.bool())
+					.executes(context -> setDebugPath(
+						context.getSource().getPlayerOrThrow(),
+						BoolArgumentType.getBool(context, "enabled")
+					))))
 			.then(CommandManager.literal("endsiege")
 				.executes(context -> endSiege(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("dumpblocks")
@@ -119,6 +128,16 @@ public final class ModCommands {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
 		state.endSiege(false, false);
 		player.sendMessage(Text.literal("Active siege cleared.").formatted(Formatting.GREEN), false);
+		return 1;
+	}
+
+	private static int setDebugPath(ServerPlayerEntity player, boolean enabled) {
+		SiegeDebug.setPathRenderEnabled(enabled);
+		player.sendMessage(
+			Text.literal("Siege path debug render " + (enabled ? "enabled" : "disabled") + ".")
+				.formatted(enabled ? Formatting.GREEN : Formatting.YELLOW),
+			false
+		);
 		return 1;
 	}
 

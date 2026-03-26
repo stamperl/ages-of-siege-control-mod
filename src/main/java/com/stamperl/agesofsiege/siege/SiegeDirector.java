@@ -100,6 +100,10 @@ public final class SiegeDirector {
 			return;
 		}
 
+		if (SiegeDebug.isPathRenderEnabled() && world.getTime() % 10L == 0L) {
+			SiegeDebug.renderPlan(world, session);
+		}
+
 		UNIT_CONTROLLER.dispatch(world, state, session);
 		resolveOutcome(world, server, state, session, objectivePos);
 	}
