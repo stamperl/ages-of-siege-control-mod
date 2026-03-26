@@ -13,12 +13,19 @@ public final class ModItems {
 		"settlement_standard",
 		new SettlementStandardItem(new Item.Settings().maxCount(16))
 	);
+	public static final Item RAID_RALLY_BANNER = register(
+		"raid_rally_banner",
+		new RaidRallyBannerItem(new Item.Settings().maxCount(16))
+	);
 
 	private ModItems() {
 	}
 
 	public static void register() {
-		ItemGroupEvents.modifyEntriesEvent(ItemGroups.TOOLS).register(entries -> entries.add(SETTLEMENT_STANDARD));
+		ItemGroupEvents.modifyEntriesEvent(ItemGroups.TOOLS).register(entries -> {
+			entries.add(SETTLEMENT_STANDARD);
+			entries.add(RAID_RALLY_BANNER);
+		});
 		AgesOfSiegeMod.LOGGER.info("Registered Ages Of Siege items.");
 	}
 

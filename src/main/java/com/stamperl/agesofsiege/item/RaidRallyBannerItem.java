@@ -6,19 +6,18 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
-public class SettlementStandardItem extends AbstractSiegeBannerItem {
-	public SettlementStandardItem(Settings settings) {
-		super(settings, Blocks.WHITE_BANNER, Blocks.WHITE_WALL_BANNER);
+public class RaidRallyBannerItem extends AbstractSiegeBannerItem {
+	public RaidRallyBannerItem(Settings settings) {
+		super(settings, Blocks.RED_BANNER, Blocks.RED_WALL_BANNER);
 	}
 
 	@Override
 	protected void afterPlaced(ServerWorld world, ServerPlayerEntity player, BlockPos targetPos) {
-		SiegeBaseState siegeState = SiegeBaseState.get(world.getServer());
-		siegeState.setBase(targetPos, world.getRegistryKey().getValue().toString(), player.getGameProfile().getName());
+		SiegeBaseState.get(world.getServer()).setRallyPoint(targetPos);
 	}
 
 	@Override
 	protected String getPlacedMessage() {
-		return "Settlement banner placed. Defend it when the siege comes.";
+		return "Raid rally banner placed. Future sieges will stage from here.";
 	}
 }

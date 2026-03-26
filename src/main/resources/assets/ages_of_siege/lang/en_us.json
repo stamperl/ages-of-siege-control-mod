@@ -1,5 +1,6 @@
 {
   "entity.ages_of_siege.siege_ram": "Battering Ram",
   "block.ages_of_siege.settlement_standard": "Settlement Standard",
-  "item.ages_of_siege.settlement_standard": "Settlement Standard"
+  "item.ages_of_siege.settlement_standard": "Settlement Standard",
+  "item.ages_of_siege.raid_rally_banner": "Raid Rally Banner"
 }

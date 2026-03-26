@@ -3,7 +3,7 @@ package com.stamperl.agesofsiege;
 import com.stamperl.agesofsiege.command.ModCommands;
 import com.stamperl.agesofsiege.entity.ModEntities;
 import com.stamperl.agesofsiege.item.ModItems;
-import com.stamperl.agesofsiege.siege.SiegeManager;
+import com.stamperl.agesofsiege.siege.SiegeDirector;
 import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +17,7 @@ public class AgesOfSiegeMod implements ModInitializer {
 		ModEntities.register();
 		ModItems.register();
 		ModCommands.register();
-		SiegeManager.register();
+		SiegeDirector.register();
 		LOGGER.info("Ages Of Siege control layer loaded.");
 	}
 }

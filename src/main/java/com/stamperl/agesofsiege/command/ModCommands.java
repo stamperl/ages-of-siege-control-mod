@@ -4,7 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.stamperl.agesofsiege.siege.BlockHpExporter;
 import com.stamperl.agesofsiege.siege.ItemRegistryExporter;
-import com.stamperl.agesofsiege.siege.SiegeManager;
+import com.stamperl.agesofsiege.siege.SiegeDirector;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.server.command.CommandManager;
@@ -27,6 +27,8 @@ public final class ModCommands {
 				.executes(context -> showStatus(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("setbase")
 				.executes(context -> setBaseAtPlayer(context.getSource().getPlayerOrThrow())))
+			.then(CommandManager.literal("setrally")
+				.executes(context -> setRallyAtPlayer(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("setage")
 				.requires(source -> source.hasPermissionLevel(2))
 				.then(CommandManager.argument("level", IntegerArgumentType.integer(0, 3))
@@ -44,6 +46,8 @@ public final class ModCommands {
 			.then(CommandManager.literal("dumpitems")
 				.requires(source -> source.hasPermissionLevel(2))
 				.executes(context -> dumpItems(context.getSource())))
+			.then(CommandManager.literal("clearrally")
+				.executes(context -> clearRally(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("clearbase")
 				.executes(context -> clearBase(context.getSource().getPlayerOrThrow()))));
 	}
@@ -51,7 +55,10 @@ public final class ModCommands {
 	private static int showStatus(ServerPlayerEntity player) {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
 		if (!state.hasBase()) {
-			player.sendMessage(Text.literal("No siege base is set yet. Build normally, then claim one when you're ready.")
+			String rallyText = state.getRallyPoint() == null
+				? "No raid rally point is set."
+				: "Current raid rally point: " + state.getRallyPoint().toShortString() + ".";
+			player.sendMessage(Text.literal("No siege base is set yet. Build normally, then claim one when you're ready. " + rallyText)
 				.formatted(Formatting.YELLOW), false);
 			return 1;
 		}
@@ -71,6 +78,13 @@ public final class ModCommands {
 		return 1;
 	}
 
+	private static int setRallyAtPlayer(ServerPlayerEntity player) {
+		SiegeBaseState state = SiegeBaseState.get(player.getServer());
+		state.setRallyPoint(player.getBlockPos());
+		player.sendMessage(Text.literal("Raid rally point set at your current position.").formatted(Formatting.GREEN), false);
+		return 1;
+	}
+
 	private static int startSiege(ServerPlayerEntity player) {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
 		if (!state.hasBase()) {
@@ -79,8 +93,8 @@ public final class ModCommands {
 			return 0;
 		}
 
-		if (!SiegeManager.startSiege(player.getServer(), state)) {
-			player.sendMessage(Text.literal("Could not start the siege. Make sure the objective exists and no siege is already active.")
+		if (!SiegeDirector.startSiege(player.getServer(), state)) {
+			player.sendMessage(Text.literal("Could not start the siege. Make sure the objective and rally banner exist and no siege is already active.")
 				.formatted(Formatting.RED), false);
 			return 0;
 		}
@@ -112,6 +126,13 @@ public final class ModCommands {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
 		state.clearBase();
 		player.sendMessage(Text.literal("Siege base cleared.").formatted(Formatting.RED), false);
+		return 1;
+	}
+
+	private static int clearRally(ServerPlayerEntity player) {
+		SiegeBaseState state = SiegeBaseState.get(player.getServer());
+		state.setRallyPoint(null);
+		player.sendMessage(Text.literal("Raid rally point cleared.").formatted(Formatting.RED), false);
 		return 1;
 	}
 

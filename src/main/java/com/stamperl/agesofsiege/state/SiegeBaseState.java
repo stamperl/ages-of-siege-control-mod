@@ -1,29 +1,35 @@
 package com.stamperl.agesofsiege.state;
 
-import com.stamperl.agesofsiege.siege.SiegeManager;
+import com.stamperl.agesofsiege.siege.WallTier;
+import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
+import com.stamperl.agesofsiege.siege.runtime.SiegePlan;
+import com.stamperl.agesofsiege.siege.runtime.SiegePlanType;
+import com.stamperl.agesofsiege.siege.runtime.SiegeSession;
+import com.stamperl.agesofsiege.siege.runtime.UnitRole;
+import com.stamperl.agesofsiege.siege.service.ObjectiveService;
+import com.stamperl.agesofsiege.siege.service.WallDamageService;
 import net.minecraft.block.Block;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtList;
-import net.minecraft.nbt.NbtString;
-import net.minecraft.nbt.NbtLong;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.PersistentState;
 import net.minecraft.world.PersistentStateManager;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
-import com.stamperl.agesofsiege.siege.WallTier;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.HashMap;
+import java.util.function.UnaryOperator;
 
 public class SiegeBaseState extends PersistentState {
 	private static final String STATE_KEY = "ages_of_siege_base";
@@ -37,21 +43,20 @@ public class SiegeBaseState extends PersistentState {
 	private String claimedBy = "unknown";
 	private int ageLevel;
 	private int completedSieges;
-	private boolean siegeActive;
-	private boolean siegePending;
 	private boolean siegeFailed;
-	private boolean breachOpen;
-	private boolean assaultModePrimed;
-	private int rushTicks;
-	private int breachedWallBlocks;
+	private BlockPos rallyPoint;
 	private BlockPos assaultOrigin;
-	private BlockPos primaryBreachTarget;
-	private int countdownTicks;
-	private int lastWaveSize;
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
-	private final List<UUID> attackerIds = new ArrayList<>();
-	private final List<UUID> ramIds = new ArrayList<>();
 	private final Map<Long, Integer> wallHealth = new HashMap<>();
+	private SiegeSession activeSession;
+
+	// Temporary compatibility shims until the old SiegeManager is replaced by SiegeDirector.
+	private transient boolean assaultModePrimedCompat;
+	private transient int rushTicksCompat;
+	private transient int deploymentHoldTicksCompat;
+	private transient int breachedWallBlocksCompat;
+	private static final ObjectiveService OBJECTIVE_SERVICE = new ObjectiveService();
+	private static final WallDamageService WALL_DAMAGE_SERVICE = new WallDamageService();
 
 	public static SiegeBaseState get(MinecraftServer server) {
 		ServerWorld overworld = server.getOverworld();
@@ -67,13 +72,14 @@ public class SiegeBaseState extends PersistentState {
 		state.claimedBy = nbt.getString("claimedBy");
 		state.ageLevel = nbt.getInt("ageLevel");
 		state.completedSieges = nbt.getInt("completedSieges");
-		state.siegeActive = nbt.getBoolean("siegeActive");
-		state.siegePending = nbt.getBoolean("siegePending");
 		state.siegeFailed = nbt.getBoolean("siegeFailed");
-		state.breachOpen = nbt.getBoolean("breachOpen");
-		state.assaultModePrimed = nbt.getBoolean("assaultModePrimed");
-		state.rushTicks = nbt.getInt("rushTicks");
-		state.breachedWallBlocks = nbt.getInt("breachedWallBlocks");
+		if (nbt.contains("rallyPointX")) {
+			state.rallyPoint = new BlockPos(
+				nbt.getInt("rallyPointX"),
+				nbt.getInt("rallyPointY"),
+				nbt.getInt("rallyPointZ")
+			);
+		}
 		if (nbt.contains("assaultOriginX")) {
 			state.assaultOrigin = new BlockPos(
 				nbt.getInt("assaultOriginX"),
@@ -81,30 +87,84 @@ public class SiegeBaseState extends PersistentState {
 				nbt.getInt("assaultOriginZ")
 			);
 		}
-		if (nbt.contains("primaryBreachTargetX")) {
-			state.primaryBreachTarget = new BlockPos(
-				nbt.getInt("primaryBreachTargetX"),
-				nbt.getInt("primaryBreachTargetY"),
-				nbt.getInt("primaryBreachTargetZ")
-			);
-		}
-		state.countdownTicks = nbt.getInt("countdownTicks");
-		state.lastWaveSize = nbt.getInt("lastWaveSize");
 		state.objectiveHealth = nbt.contains("objectiveHealth") ? nbt.getInt("objectiveHealth") : MAX_OBJECTIVE_HEALTH;
-		NbtList attackerList = nbt.getList("attackers", NbtElement.STRING_TYPE);
-		for (NbtElement element : attackerList) {
-			state.attackerIds.add(UUID.fromString(element.asString()));
-		}
-		NbtList ramList = nbt.getList("rams", NbtElement.STRING_TYPE);
-		for (NbtElement element : ramList) {
-			state.ramIds.add(UUID.fromString(element.asString()));
-		}
 		NbtList wallList = nbt.getList("wallHealth", NbtElement.COMPOUND_TYPE);
 		for (NbtElement element : wallList) {
 			NbtCompound entry = (NbtCompound) element;
 			state.wallHealth.put(entry.getLong("pos"), entry.getInt("hp"));
 		}
+
+		if (nbt.contains("activeSession", NbtElement.COMPOUND_TYPE)) {
+			state.activeSession = SiegeSession.fromNbt(nbt.getCompound("activeSession"));
+		} else {
+			state.activeSession = migrateLegacySession(nbt, state);
+		}
+
+		state.assaultModePrimedCompat = nbt.getBoolean("assaultModePrimed");
+		state.rushTicksCompat = nbt.getInt("rushTicks");
+		state.deploymentHoldTicksCompat = nbt.getInt("deploymentHoldTicks");
+		state.breachedWallBlocksCompat = nbt.getInt("breachedWallBlocks");
 		return state;
+	}
+
+	private static SiegeSession migrateLegacySession(NbtCompound nbt, SiegeBaseState state) {
+		boolean legacyPending = nbt.getBoolean("siegePending");
+		boolean legacyActive = nbt.getBoolean("siegeActive");
+		if (!legacyPending && !legacyActive) {
+			return null;
+		}
+
+		List<UUID> attackerIds = readLegacyUuidList(nbt.getList("attackers", NbtElement.STRING_TYPE));
+		List<UUID> ramIds = readLegacyUuidList(nbt.getList("rams", NbtElement.STRING_TYPE));
+		BlockPos legacyPrimaryBreachTarget = null;
+		if (nbt.contains("primaryBreachTargetX")) {
+			legacyPrimaryBreachTarget = new BlockPos(
+				nbt.getInt("primaryBreachTargetX"),
+				nbt.getInt("primaryBreachTargetY"),
+				nbt.getInt("primaryBreachTargetZ")
+			);
+		}
+		SiegePlan legacyPlan = legacyPrimaryBreachTarget == null
+			? null
+			: new SiegePlan(
+				SiegePlanType.BREACH_REQUIRED,
+				Vec3d.ZERO,
+				state.assaultOrigin == null ? state.basePos : state.assaultOrigin,
+				legacyPrimaryBreachTarget,
+				List.of(legacyPrimaryBreachTarget),
+				null,
+				false,
+				0,
+				0,
+				0.0F,
+				0L
+			);
+		return new SiegeSession(
+			legacyPending ? SiegePhase.COUNTDOWN : SiegePhase.FORM_UP,
+			state.ageLevel,
+			state.completedSieges,
+			state.basePos,
+			state.rallyPoint,
+			state.assaultOrigin,
+			0L,
+			0L,
+			nbt.getInt("countdownTicks"),
+			attackerIds,
+			ramIds,
+			Map.of(),
+			legacyPlan,
+			null,
+			0L,
+			null
+		);
+	}
+
+	private static List<UUID> readLegacyUuidList(NbtList list) {
+		List<UUID> ids = new ArrayList<>();
+		for (NbtElement element : list) {
+			ids.add(UUID.fromString(element.asString()));
+		}
+		return List.copyOf(ids);
 	}
 
 	public void setBase(BlockPos pos, String dimensionId, String claimedBy) {
@@ -114,13 +174,9 @@ public class SiegeBaseState extends PersistentState {
 		this.claimedBy = claimedBy;
 		this.ageLevel = Math.max(this.ageLevel, 0);
 		this.siegeFailed = false;
-		this.breachOpen = false;
-		this.assaultModePrimed = false;
-		this.rushTicks = 0;
-		this.breachedWallBlocks = 0;
-		this.assaultOrigin = null;
-		this.primaryBreachTarget = null;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
+		this.activeSession = null;
+		resetCompatRuntime();
 		markDirty();
 	}
 
@@ -129,21 +185,13 @@ public class SiegeBaseState extends PersistentState {
 		this.basePos = BlockPos.ORIGIN;
 		this.dimensionId = "minecraft:overworld";
 		this.claimedBy = "unknown";
-		this.siegePending = false;
-		this.siegeActive = false;
 		this.siegeFailed = false;
-		this.breachOpen = false;
-		this.assaultModePrimed = false;
-		this.rushTicks = 0;
-		this.breachedWallBlocks = 0;
+		this.rallyPoint = null;
 		this.assaultOrigin = null;
-		this.primaryBreachTarget = null;
-		this.countdownTicks = 0;
-		this.lastWaveSize = 0;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
-		this.attackerIds.clear();
-		this.ramIds.clear();
 		this.wallHealth.clear();
+		this.activeSession = null;
+		resetCompatRuntime();
 		markDirty();
 	}
 
@@ -156,55 +204,80 @@ public class SiegeBaseState extends PersistentState {
 	}
 
 	public boolean isSiegeActive() {
-		return siegeActive;
+		if (activeSession == null) {
+			return false;
+		}
+		return switch (activeSession.getPhase()) {
+			case FORM_UP, ADVANCE, BREACH, RUSH, CLEANUP -> true;
+			default -> false;
+		};
 	}
 
 	public boolean isSiegePending() {
-		return siegePending;
+		return activeSession != null && activeSession.getPhase() == SiegePhase.COUNTDOWN;
 	}
 
 	public boolean isBreachOpen() {
-		return breachOpen;
+		return activeSession != null && activeSession.getPhase() == SiegePhase.RUSH;
 	}
 
 	public void setBreachOpen(boolean breachOpen) {
-		if (this.breachOpen == breachOpen) {
+		if (activeSession == null) {
 			return;
 		}
-		this.breachOpen = breachOpen;
-		markDirty();
+		if (breachOpen && activeSession.getPhase() != SiegePhase.RUSH) {
+			setSessionPhase(SiegePhase.RUSH);
+		} else if (!breachOpen && activeSession.getPhase() == SiegePhase.RUSH) {
+			setSessionPhase(SiegePhase.BREACH);
+		}
 	}
 
 	public boolean isAssaultModePrimed() {
-		return assaultModePrimed;
+		return assaultModePrimedCompat;
 	}
 
 	public void setAssaultModePrimed(boolean assaultModePrimed) {
-		if (this.assaultModePrimed == assaultModePrimed) {
+		if (this.assaultModePrimedCompat == assaultModePrimed) {
 			return;
 		}
-		this.assaultModePrimed = assaultModePrimed;
+		this.assaultModePrimedCompat = assaultModePrimed;
 		markDirty();
 	}
 
 	public int getRushTicks() {
-		return rushTicks;
+		return rushTicksCompat;
 	}
 
 	public void setRushTicks(int rushTicks) {
-		if (this.rushTicks == rushTicks) {
+		if (this.rushTicksCompat == rushTicks) {
 			return;
 		}
-		this.rushTicks = rushTicks;
+		this.rushTicksCompat = rushTicks;
 		markDirty();
 	}
 
 	public int getBreachedWallBlocks() {
-		return breachedWallBlocks;
+		return breachedWallBlocksCompat;
 	}
 
 	public BlockPos getAssaultOrigin() {
 		return assaultOrigin;
+	}
+
+	public BlockPos getRallyPoint() {
+		return rallyPoint;
+	}
+
+	public void setRallyPoint(BlockPos rallyPoint) {
+		BlockPos next = rallyPoint == null ? null : rallyPoint.toImmutable();
+		if (this.rallyPoint != null && this.rallyPoint.equals(next)) {
+			return;
+		}
+		if (this.rallyPoint == null && next == null) {
+			return;
+		}
+		this.rallyPoint = next;
+		markDirty();
 	}
 
 	public void setAssaultOrigin(BlockPos assaultOrigin) {
@@ -216,27 +289,113 @@ public class SiegeBaseState extends PersistentState {
 			return;
 		}
 		this.assaultOrigin = next;
-		markDirty();
+		updateSession(session -> new SiegeSession(
+			session.getPhase(),
+			session.getSessionAgeLevel(),
+			session.getSessionVictoryCount(),
+			session.getObjectivePos(),
+			session.getRallyPos(),
+			next,
+			session.getStartedGameTime(),
+			session.getPhaseStartedGameTime(),
+			session.getCountdownEndGameTime(),
+			session.getAttackerIds(),
+			session.getEngineIds(),
+			session.getRoleAssignments(),
+			session.getCurrentPlan(),
+			session.getLastObservation(),
+			session.getLastPlanTick(),
+			session.getFallbackReason()
+		));
 	}
 
 	public BlockPos getPrimaryBreachTarget() {
-		return primaryBreachTarget;
+		return activeSession != null && activeSession.getCurrentPlan() != null
+			? activeSession.getCurrentPlan().primaryBreachAnchor()
+			: null;
 	}
 
 	public void setPrimaryBreachTarget(BlockPos primaryBreachTarget) {
+		if (activeSession == null) {
+			return;
+		}
 		BlockPos next = primaryBreachTarget == null ? null : primaryBreachTarget.toImmutable();
-		if (this.primaryBreachTarget != null && this.primaryBreachTarget.equals(next)) {
-			return;
+		SiegePlan currentPlan = activeSession.getCurrentPlan();
+		SiegePlan nextPlan;
+		if (next == null) {
+			nextPlan = null;
+		} else if (currentPlan == null) {
+			nextPlan = new SiegePlan(
+				SiegePlanType.BREACH_REQUIRED,
+				Vec3d.ZERO,
+				activeSession.getSpawnCenter() == null ? basePos : activeSession.getSpawnCenter(),
+				next,
+				List.of(next),
+				null,
+				false,
+				0,
+				0,
+				0.0F,
+				0L
+			);
+		} else {
+			nextPlan = new SiegePlan(
+				currentPlan.planType(),
+				currentPlan.approachVector(),
+				currentPlan.stagingPoint(),
+				next,
+				currentPlan.targetBlocks(),
+				currentPlan.breachExit(),
+				currentPlan.objectiveReachableAfterBreach(),
+				currentPlan.openingWidth(),
+				currentPlan.openingHeight(),
+				currentPlan.confidence(),
+				currentPlan.expiresAtTick()
+			);
 		}
-		if (this.primaryBreachTarget == null && next == null) {
-			return;
-		}
-		this.primaryBreachTarget = next;
-		markDirty();
+		updateSession(session -> new SiegeSession(
+			session.getPhase(),
+			session.getSessionAgeLevel(),
+			session.getSessionVictoryCount(),
+			session.getObjectivePos(),
+			session.getRallyPos(),
+			session.getSpawnCenter(),
+			session.getStartedGameTime(),
+			session.getPhaseStartedGameTime(),
+			session.getCountdownEndGameTime(),
+			session.getAttackerIds(),
+			session.getEngineIds(),
+			session.getRoleAssignments(),
+			nextPlan,
+			session.getLastObservation(),
+			session.getLastPlanTick(),
+			session.getFallbackReason()
+		));
 	}
 
 	public int getObjectiveHealth() {
 		return objectiveHealth;
+	}
+
+	public int getDeploymentHoldTicks() {
+		return deploymentHoldTicksCompat;
+	}
+
+	public void setDeploymentHoldTicks(int deploymentHoldTicks) {
+		if (this.deploymentHoldTicksCompat == deploymentHoldTicks) {
+			return;
+		}
+		this.deploymentHoldTicksCompat = Math.max(0, deploymentHoldTicks);
+		markDirty();
+	}
+
+	public int tickDeploymentHold() {
+		if (deploymentHoldTicksCompat <= 0) {
+			return 0;
+		}
+		deploymentHoldTicksCompat--;
+		markDirty();
+		return deploymentHoldTicksCompat;
 	}
 
 	public int getMaxObjectiveHealth() {
@@ -256,12 +415,8 @@ public class SiegeBaseState extends PersistentState {
 		this.ageLevel = clampedAge;
 		this.completedSieges = AGE_THRESHOLDS[clampedAge];
 		this.siegeFailed = false;
-		this.breachOpen = false;
-		this.assaultModePrimed = false;
-		this.rushTicks = 0;
-		this.breachedWallBlocks = 0;
-		this.assaultOrigin = null;
-		this.primaryBreachTarget = null;
+		this.activeSession = null;
+		resetCompatRuntime();
 		markDirty();
 	}
 
@@ -274,28 +429,70 @@ public class SiegeBaseState extends PersistentState {
 		if (nextAge >= AGE_THRESHOLDS.length) {
 			return -1;
 		}
-
 		return AGE_THRESHOLDS[nextAge];
 	}
 
 	public List<UUID> getAttackerIds() {
-		return List.copyOf(attackerIds);
+		return activeSession == null ? List.of() : activeSession.getAttackerIds();
 	}
 
 	public void replaceAttackers(List<UUID> attackerIds) {
-		this.attackerIds.clear();
-		this.attackerIds.addAll(attackerIds);
-		markDirty();
+		updateSession(session -> new SiegeSession(
+			session.getPhase(),
+			session.getSessionAgeLevel(),
+			session.getSessionVictoryCount(),
+			session.getObjectivePos(),
+			session.getRallyPos(),
+			session.getSpawnCenter(),
+			session.getStartedGameTime(),
+			session.getPhaseStartedGameTime(),
+			session.getCountdownEndGameTime(),
+			attackerIds,
+			session.getEngineIds(),
+			session.getRoleAssignments(),
+			session.getCurrentPlan(),
+			session.getLastObservation(),
+			session.getLastPlanTick(),
+			session.getFallbackReason()
+		));
 	}
 
 	public List<UUID> getRamIds() {
-		return List.copyOf(ramIds);
+		return activeSession == null ? List.of() : activeSession.getEngineIds();
 	}
 
 	public void replaceRams(List<UUID> ramIds) {
-		this.ramIds.clear();
-		this.ramIds.addAll(ramIds);
+		updateSession(session -> new SiegeSession(
+			session.getPhase(),
+			session.getSessionAgeLevel(),
+			session.getSessionVictoryCount(),
+			session.getObjectivePos(),
+			session.getRallyPos(),
+			session.getSpawnCenter(),
+			session.getStartedGameTime(),
+			session.getPhaseStartedGameTime(),
+			session.getCountdownEndGameTime(),
+			session.getAttackerIds(),
+			ramIds,
+			session.getRoleAssignments(),
+			session.getCurrentPlan(),
+			session.getLastObservation(),
+			session.getLastPlanTick(),
+			session.getFallbackReason()
+		));
+	}
+
+	public SiegeSession getActiveSession() {
+		return activeSession;
+	}
+
+	public void setActiveSession(SiegeSession activeSession) {
+		this.activeSession = activeSession;
 		markDirty();
+	}
+
+	public void updateActiveSession(UnaryOperator<SiegeSession> updater) {
+		updateSession(updater);
 	}
 
 	public ServerWorld getBaseWorld(MinecraftServer server) {
@@ -303,25 +500,33 @@ public class SiegeBaseState extends PersistentState {
 		if (id == null) {
 			return null;
 		}
-
 		return server.getWorld(RegistryKey.of(RegistryKeys.WORLD, id));
 	}
 
 	public void beginCountdown(MinecraftServer server, int countdownSeconds) {
-		this.siegePending = true;
-		this.siegeActive = false;
 		this.siegeFailed = false;
-		this.breachOpen = false;
-		this.assaultModePrimed = false;
-		this.rushTicks = 0;
-		this.breachedWallBlocks = 0;
-		this.assaultOrigin = null;
-		this.primaryBreachTarget = null;
-		this.countdownTicks = countdownSeconds * 20;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
-		this.attackerIds.clear();
-		this.ramIds.clear();
 		this.wallHealth.clear();
+		resetCompatRuntime();
+		long now = server.getOverworld().getTime();
+		this.activeSession = new SiegeSession(
+			SiegePhase.COUNTDOWN,
+			ageLevel,
+			completedSieges,
+			basePos,
+			rallyPoint,
+			assaultOrigin,
+			now,
+			now,
+			now + (countdownSeconds * 20L),
+			List.of(),
+			List.of(),
+			Map.of(),
+			null,
+			null,
+			0L,
+			null
+		);
 		server.getPlayerManager().broadcast(
 			Text.literal("A siege is approaching. Defend the Settlement Standard."),
 			false
@@ -330,121 +535,149 @@ public class SiegeBaseState extends PersistentState {
 	}
 
 	public int tickCountdown() {
-		if (!siegePending || countdownTicks <= 0) {
-			return countdownTicks;
+		if (!isSiegePending() || activeSession == null) {
+			return 0;
 		}
-
-		countdownTicks--;
+		long remaining = Math.max(0L, activeSession.getCountdownEndGameTime() - activeSession.getPhaseStartedGameTime());
+		long nextCountdownEnd = Math.max(activeSession.getPhaseStartedGameTime(), activeSession.getCountdownEndGameTime() - 1L);
+		activeSession = new SiegeSession(
+			activeSession.getPhase(),
+			activeSession.getSessionAgeLevel(),
+			activeSession.getSessionVictoryCount(),
+			activeSession.getObjectivePos(),
+			activeSession.getRallyPos(),
+			activeSession.getSpawnCenter(),
+			activeSession.getStartedGameTime(),
+			activeSession.getPhaseStartedGameTime(),
+			nextCountdownEnd,
+			activeSession.getAttackerIds(),
+			activeSession.getEngineIds(),
+			activeSession.getRoleAssignments(),
+			activeSession.getCurrentPlan(),
+			activeSession.getLastObservation(),
+			activeSession.getLastPlanTick(),
+			activeSession.getFallbackReason()
+		);
 		markDirty();
-		return countdownTicks;
+		return (int) Math.max(0L, remaining - 1L);
+	}
+
+	public int getCountdownTicks() {
+		if (!isSiegePending() || activeSession == null) {
+			return 0;
+		}
+		return (int) Math.max(0L, activeSession.getCountdownEndGameTime() - activeSession.getPhaseStartedGameTime());
+	}
+
+	public void stageSiegeWave(List<UUID> attackerIds, List<UUID> ramIds, Map<UUID, UnitRole> roleAssignments, int waveSize, BlockPos assaultOrigin) {
+		this.assaultOrigin = assaultOrigin == null ? null : assaultOrigin.toImmutable();
+		updateSession(session -> new SiegeSession(
+			SiegePhase.COUNTDOWN,
+			session.getSessionAgeLevel(),
+			session.getSessionVictoryCount(),
+			session.getObjectivePos(),
+			session.getRallyPos(),
+			this.assaultOrigin,
+			session.getStartedGameTime(),
+			session.getPhaseStartedGameTime(),
+			session.getCountdownEndGameTime(),
+			attackerIds,
+			ramIds,
+			roleAssignments,
+			session.getCurrentPlan(),
+			session.getLastObservation(),
+			session.getLastPlanTick(),
+			session.getFallbackReason()
+		));
+		markDirty();
 	}
 
 	public void startSiege(MinecraftServer server, List<UUID> attackerIds, List<UUID> ramIds, int waveSize, BlockPos assaultOrigin) {
-		this.siegePending = false;
-		this.siegeActive = true;
-		this.siegeFailed = false;
-		this.breachOpen = false;
-		this.assaultModePrimed = false;
-		this.rushTicks = 0;
-		this.breachedWallBlocks = 0;
 		this.assaultOrigin = assaultOrigin == null ? null : assaultOrigin.toImmutable();
-		this.primaryBreachTarget = null;
-		this.countdownTicks = 0;
-		this.lastWaveSize = waveSize;
-		this.attackerIds.clear();
-		this.attackerIds.addAll(attackerIds);
-		this.ramIds.clear();
-		this.ramIds.addAll(ramIds);
+		long now = server.getOverworld().getTime();
+		this.activeSession = new SiegeSession(
+			SiegePhase.FORM_UP,
+			ageLevel,
+			completedSieges,
+			basePos,
+			rallyPoint,
+			this.assaultOrigin,
+			now,
+			now,
+			0L,
+			attackerIds,
+			ramIds,
+			Map.of(),
+			null,
+			null,
+			0L,
+			null
+		);
+		this.siegeFailed = false;
+		this.assaultModePrimedCompat = false;
+		this.rushTicksCompat = 0;
+		this.deploymentHoldTicksCompat = 40;
+		this.breachedWallBlocksCompat = 0;
+		this.wallHealth.clear();
+		server.getPlayerManager().broadcast(Text.literal("A siege has begun. Defend the Settlement Standard!"), false);
+		markDirty();
+	}
+
+	public void activateStagedSiege(MinecraftServer server) {
+		if (activeSession == null) {
+			return;
+		}
+		long now = server.getOverworld().getTime();
+		this.activeSession = new SiegeSession(
+			SiegePhase.FORM_UP,
+			activeSession.getSessionAgeLevel(),
+			activeSession.getSessionVictoryCount(),
+			activeSession.getObjectivePos(),
+			activeSession.getRallyPos(),
+			activeSession.getSpawnCenter(),
+			activeSession.getStartedGameTime() == 0L ? now : activeSession.getStartedGameTime(),
+			now,
+			0L,
+			activeSession.getAttackerIds(),
+			activeSession.getEngineIds(),
+			activeSession.getRoleAssignments(),
+			activeSession.getCurrentPlan(),
+			activeSession.getLastObservation(),
+			activeSession.getLastPlanTick(),
+			activeSession.getFallbackReason()
+		);
+		this.siegeFailed = false;
+		this.assaultModePrimedCompat = false;
+		this.rushTicksCompat = 0;
+		this.deploymentHoldTicksCompat = 40;
 		this.wallHealth.clear();
 		server.getPlayerManager().broadcast(Text.literal("A siege has begun. Defend the Settlement Standard!"), false);
 		markDirty();
 	}
 
 	public void endSiege(boolean failed, boolean rewardProgress) {
-		this.siegePending = false;
-		this.siegeActive = false;
 		this.siegeFailed = failed;
-		this.breachOpen = false;
-		this.assaultModePrimed = false;
-		this.rushTicks = 0;
-		this.breachedWallBlocks = 0;
 		this.assaultOrigin = null;
-		this.primaryBreachTarget = null;
-		this.countdownTicks = 0;
+		this.activeSession = null;
+		resetCompatRuntime();
 		if (rewardProgress && !failed) {
 			this.completedSieges++;
 			this.ageLevel = resolveAgeLevel(this.completedSieges);
 		}
-		this.attackerIds.clear();
-		this.ramIds.clear();
 		this.wallHealth.clear();
 		markDirty();
 	}
 
 	public void damageObjective(ServerWorld world, int amount) {
-		if (!hasBase) {
-			return;
-		}
-
-		this.objectiveHealth = Math.max(0, this.objectiveHealth - amount);
-		if (this.objectiveHealth == 0) {
-			world.breakBlock(basePos, false);
-			handleObjectiveDestroyed(world, basePos);
-			return;
-		}
-
-		if (siegeActive) {
-			world.getServer().getPlayerManager().broadcast(
-				Text.literal("Settlement banner damaged: " + objectiveHealth + "/" + MAX_OBJECTIVE_HEALTH + " HP"),
-				false
-			);
-		}
-
-		markDirty();
+		OBJECTIVE_SERVICE.damageObjective(world, this, activeSession, amount);
 	}
 
 	public boolean damageWall(ServerWorld world, BlockPos pos, int amount) {
-		var state = world.getBlockState(pos);
-		WallTier tier = WallTier.from(state);
-		if (tier == WallTier.NONE) {
-			return false;
-		}
-
-		long key = pos.asLong();
-		int remaining = wallHealth.getOrDefault(key, tier.getHitPoints()) - amount;
-		world.syncWorldEvent(2001, pos, Block.getRawIdFromState(state));
-		if (remaining <= 0) {
-			wallHealth.remove(key);
-			world.breakBlock(pos, false);
-			breachedWallBlocks++;
-			world.getServer().getPlayerManager().broadcast(
-				Text.literal("A breacher smashed through a " + tier.name().toLowerCase() + " wall block."),
-				false
-			);
-			markDirty();
-			return true;
-		}
-
-		wallHealth.put(key, remaining);
-		markDirty();
-		return true;
+		return WALL_DAMAGE_SERVICE.damageWall(world, this, activeSession, pos, amount);
 	}
 
 	public void handleObjectiveDestroyed(ServerWorld world, BlockPos pos) {
-		if (!hasBase || !basePos.equals(pos) || !world.getRegistryKey().getValue().toString().equals(dimensionId)) {
-			return;
-		}
-
-		if (siegeActive) {
-			SiegeManager.failActiveSiege(world, this, "The Settlement Standard was destroyed. The siege is lost.");
-			return;
-		}
-
-		clearBase();
-		world.getServer().getPlayerManager().broadcast(
-			Text.literal("The Settlement Standard was destroyed. This base is no longer claimed."),
-			false
-		);
+		OBJECTIVE_SERVICE.handleObjectiveDestroyed(world, this, activeSession, pos);
 	}
 
 	public String describe() {
@@ -452,21 +685,22 @@ public class SiegeBaseState extends PersistentState {
 		String nextAgeText = nextRequirement < 0
 			? "max age reached"
 			: nextRequirement + " victories for next age";
+		String rallyText = rallyPoint == null ? "unset" : rallyPoint.toShortString();
+		String phaseText = activeSession == null ? "none" : activeSession.getPhase().name();
 		return String.format(
-			"Current siege base: %s in %s, claimed by %s. Objective HP: %d/%d. Age: %s (%d). Completed sieges: %d. Progress: %s. Siege pending: %s. Siege active: %s. Siege failed: %s. Last wave size: %d.",
+			"Current siege base: %s in %s, claimed by %s. Rally point: %s. Objective HP: %d/%d. Age: %s (%d). Completed sieges: %d. Progress: %s. Session phase: %s. Siege failed: %s.",
 			basePos.toShortString(),
 			dimensionId,
 			claimedBy,
+			rallyText,
 			objectiveHealth,
 			MAX_OBJECTIVE_HEALTH,
 			getAgeName(),
 			ageLevel,
 			completedSieges,
 			nextAgeText,
-			siegePending ? "yes" : "no",
-			siegeActive ? "yes" : "no",
-			siegeFailed ? "yes" : "no",
-			lastWaveSize
+			phaseText,
+			siegeFailed ? "yes" : "no"
 		);
 	}
 
@@ -480,36 +714,21 @@ public class SiegeBaseState extends PersistentState {
 		nbt.putString("claimedBy", claimedBy);
 		nbt.putInt("ageLevel", ageLevel);
 		nbt.putInt("completedSieges", completedSieges);
-		nbt.putBoolean("siegePending", siegePending);
-		nbt.putBoolean("siegeActive", siegeActive);
 		nbt.putBoolean("siegeFailed", siegeFailed);
-		nbt.putBoolean("breachOpen", breachOpen);
-		nbt.putBoolean("assaultModePrimed", assaultModePrimed);
-		nbt.putInt("rushTicks", rushTicks);
-		nbt.putInt("breachedWallBlocks", breachedWallBlocks);
+		if (rallyPoint != null) {
+			nbt.putInt("rallyPointX", rallyPoint.getX());
+			nbt.putInt("rallyPointY", rallyPoint.getY());
+			nbt.putInt("rallyPointZ", rallyPoint.getZ());
+		}
 		if (assaultOrigin != null) {
 			nbt.putInt("assaultOriginX", assaultOrigin.getX());
 			nbt.putInt("assaultOriginY", assaultOrigin.getY());
 			nbt.putInt("assaultOriginZ", assaultOrigin.getZ());
 		}
-		if (primaryBreachTarget != null) {
-			nbt.putInt("primaryBreachTargetX", primaryBreachTarget.getX());
-			nbt.putInt("primaryBreachTargetY", primaryBreachTarget.getY());
-			nbt.putInt("primaryBreachTargetZ", primaryBreachTarget.getZ());
-		}
-		nbt.putInt("countdownTicks", countdownTicks);
-		nbt.putInt("lastWaveSize", lastWaveSize);
 		nbt.putInt("objectiveHealth", objectiveHealth);
-		NbtList attackerList = new NbtList();
-		for (UUID attackerId : attackerIds) {
-			attackerList.add(NbtString.of(attackerId.toString()));
+		if (activeSession != null) {
+			nbt.put("activeSession", activeSession.toNbt());
 		}
-		nbt.put("attackers", attackerList);
-		NbtList ramList = new NbtList();
-		for (UUID ramId : ramIds) {
-			ramList.add(NbtString.of(ramId.toString()));
-		}
-		nbt.put("rams", ramList);
 		NbtList wallList = new NbtList();
 		for (Map.Entry<Long, Integer> entry : wallHealth.entrySet()) {
 			NbtCompound wallEntry = new NbtCompound();
@@ -521,6 +740,46 @@ public class SiegeBaseState extends PersistentState {
 		return nbt;
 	}
 
+	private void updateSession(UnaryOperator<SiegeSession> updater) {
+		if (activeSession == null) {
+			return;
+		}
+		SiegeSession updated = updater.apply(activeSession);
+		if (updated == null) {
+			return;
+		}
+		activeSession = updated;
+		markDirty();
+	}
+
+	private void setSessionPhase(SiegePhase phase) {
+		updateSession(session -> new SiegeSession(
+			phase,
+			session.getSessionAgeLevel(),
+			session.getSessionVictoryCount(),
+			session.getObjectivePos(),
+			session.getRallyPos(),
+			session.getSpawnCenter(),
+			session.getStartedGameTime(),
+			session.getPhaseStartedGameTime(),
+			session.getCountdownEndGameTime(),
+			session.getAttackerIds(),
+			session.getEngineIds(),
+			session.getRoleAssignments(),
+			session.getCurrentPlan(),
+			session.getLastObservation(),
+			session.getLastPlanTick(),
+			session.getFallbackReason()
+		));
+	}
+
+	private void resetCompatRuntime() {
+		this.assaultModePrimedCompat = false;
+		this.rushTicksCompat = 0;
+		this.deploymentHoldTicksCompat = 0;
+		this.breachedWallBlocksCompat = 0;
+	}
+
 	private static int resolveAgeLevel(int completedSieges) {
 		int resolved = 0;
 		for (int i = 0; i < AGE_THRESHOLDS.length; i++) {
@@ -529,5 +788,29 @@ public class SiegeBaseState extends PersistentState {
 			}
 		}
 		return resolved;
+	}
+
+	public String getDimensionId() {
+		return dimensionId;
+	}
+
+	public void setObjectiveHealthValue(int objectiveHealth) {
+		this.objectiveHealth = objectiveHealth;
+	}
+
+	public int getTrackedWallHealthOrDefault(BlockPos pos, int defaultValue) {
+		return wallHealth.getOrDefault(pos.asLong(), defaultValue);
+	}
+
+	public void setTrackedWallHealth(BlockPos pos, int remaining) {
+		wallHealth.put(pos.asLong(), remaining);
+	}
+
+	public void removeTrackedWallHealth(BlockPos pos) {
+		wallHealth.remove(pos.asLong());
+	}
+
+	public void incrementBreachedWallBlocks() {
+		breachedWallBlocksCompat++;
 	}
 }
