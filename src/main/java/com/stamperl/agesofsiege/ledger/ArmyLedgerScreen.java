@@ -39,6 +39,9 @@ public class ArmyLedgerScreen extends Screen {
 	private static final int MIN_FRAME_WIDTH = 760;
 	private static final int MIN_FRAME_HEIGHT = 480;
 	private static final int STACKED_CONTENT_MAX_WIDTH = 1160;
+	private static final float MAP_ZOOM_MIN = 1.0F;
+	private static final float MAP_ZOOM_MAX = 4.0F;
+	private static final float MAP_ZOOM_STEP = 0.25F;
 
 	private static final int SCRIM_COLOR = 0x90070A0E;
 	private static final int FRAME_COLOR = 0xFF12181D;
@@ -71,11 +74,17 @@ public class ArmyLedgerScreen extends Screen {
 	private ButtonWidget cycleRoleButton;
 	private ButtonWidget locateButton;
 
-	private MapBounds cachedMapBounds;
+	private MapView cachedMapBounds;
 	private int[] cachedMapColors = new int[0];
 	private int cachedSamplesX = -1;
 	private int cachedSamplesZ = -1;
 	private long cachedMapTick = Long.MIN_VALUE;
+	private float mapZoom = 1.0F;
+	private float mapPanX;
+	private float mapPanZ;
+	private boolean mapDragging;
+	private double mapDragLastX;
+	private double mapDragLastY;
 
 	private enum LayoutDensity {
 		COMPACT,
@@ -137,7 +146,81 @@ public class ArmyLedgerScreen extends Screen {
 			selectDefender(markerIndex);
 			return true;
 		}
+		if (button == 0) {
+			Rect mapBody = createLayout().mapBody;
+			if (contains(mapBody, mouseX, mouseY)) {
+				mapDragging = true;
+				mapDragLastX = mouseX;
+				mapDragLastY = mouseY;
+				return true;
+			}
+		}
 		return super.mouseClicked(mouseX, mouseY, button);
+	}
+
+	@Override
+	public boolean mouseReleased(double mouseX, double mouseY, int button) {
+		if (button == 0 && mapDragging) {
+			mapDragging = false;
+			return true;
+		}
+		return super.mouseReleased(mouseX, mouseY, button);
+	}
+
+	@Override
+	public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+		if (!mapDragging || button != 0) {
+			return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
+		}
+		Layout layout = createLayout();
+		Rect body = layout.mapBody;
+		MapView view = computeMapView(body);
+		float worldPerPixelX = (view.maxX - view.minX) / Math.max(1.0F, body.width);
+		float worldPerPixelZ = (view.maxZ - view.minZ) / Math.max(1.0F, body.height);
+		mapPanX -= (float) ((mouseX - mapDragLastX) * worldPerPixelX);
+		mapPanZ -= (float) ((mouseY - mapDragLastY) * worldPerPixelZ);
+		mapDragLastX = mouseX;
+		mapDragLastY = mouseY;
+		invalidateMapCache();
+		return true;
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double verticalAmount) {
+		Layout layout = createLayout();
+		Rect body = layout.mapBody;
+		if (!contains(body, mouseX, mouseY) || verticalAmount == 0.0D) {
+			return super.mouseScrolled(mouseX, mouseY, verticalAmount);
+		}
+
+		MapView currentView = computeMapView(body);
+		float normalizedX = MathHelper.clamp((float) ((mouseX - body.x) / Math.max(1.0, body.width)), 0.0F, 1.0F);
+		float normalizedZ = MathHelper.clamp((float) ((mouseY - body.y) / Math.max(1.0, body.height)), 0.0F, 1.0F);
+		float worldX = MathHelper.lerp(normalizedX, currentView.minX, currentView.maxX);
+		float worldZ = MathHelper.lerp(normalizedZ, currentView.minZ, currentView.maxZ);
+
+		float previousZoom = mapZoom;
+		mapZoom = MathHelper.clamp(mapZoom + (verticalAmount > 0.0D ? MAP_ZOOM_STEP : -MAP_ZOOM_STEP), MAP_ZOOM_MIN, MAP_ZOOM_MAX);
+		if (previousZoom == mapZoom) {
+			return true;
+		}
+
+		BaseBounds baseBounds = computeBaseBounds();
+		float baseCenterX = (baseBounds.minX + baseBounds.maxX) * 0.5F;
+		float baseCenterZ = (baseBounds.minZ + baseBounds.maxZ) * 0.5F;
+		float aspect = body.width / (float) Math.max(1, body.height);
+		float baseWidth = Math.max(baseBounds.maxX - baseBounds.minX, baseBounds.maxZ - baseBounds.minZ * aspect);
+		float baseHeight = Math.max(baseBounds.maxZ - baseBounds.minZ, baseWidth / Math.max(0.01F, aspect));
+		float paddedWidth = Math.max(18.0F, (baseBounds.maxX - baseBounds.minX) + 10.0F);
+		float paddedHeight = Math.max(18.0F, (baseBounds.maxZ - baseBounds.minZ) + 10.0F);
+		float viewWidth = Math.max(12.0F, Math.max(paddedWidth, paddedHeight * aspect) / mapZoom);
+		float viewHeight = Math.max(12.0F, Math.max(paddedHeight, paddedWidth / Math.max(0.01F, aspect)) / mapZoom);
+		float centerX = worldX - ((normalizedX - 0.5F) * viewWidth);
+		float centerZ = worldZ - ((normalizedZ - 0.5F) * viewHeight);
+		mapPanX = centerX - baseCenterX;
+		mapPanZ = centerZ - baseCenterZ;
+		invalidateMapCache();
+		return true;
 	}
 
 	private void drawFrame(DrawContext context, Rect frame) {
@@ -198,7 +281,7 @@ public class ArmyLedgerScreen extends Screen {
 		context.fill(panel.x + 12, panel.y + PANEL_HEADER_HEIGHT, panel.right() - 12, panel.y + PANEL_HEADER_HEIGHT + 1, CARD_BORDER);
 		drawTrimmed(context, "Tactical Map", panel.x + 14, panel.y + 13, 160, TEXT_PRIMARY);
 		if (layout.density != LayoutDensity.COMPACT) {
-			drawScaledText(context, "Click a guard marker to inspect and command", panel.right() - 250, panel.y + 15, TEXT_SECONDARY, metaScale(layout.density));
+			drawScaledText(context, String.format("Zoom %.2fx  •  Wheel to zoom  •  Drag to pan", mapZoom), panel.right() - 250, panel.y + 15, TEXT_SECONDARY, metaScale(layout.density));
 		}
 
 		drawTerrainMap(context, body);
@@ -211,7 +294,7 @@ public class ArmyLedgerScreen extends Screen {
 		context.fill(body.x, body.y, body.right(), body.bottom(), MAP_BG);
 		context.drawBorder(body.x, body.y, body.width, body.height, PANEL_BORDER);
 
-		MapBounds bounds = computeMapBounds();
+		MapView bounds = computeMapView(body);
 		ensureMapCache(body, bounds);
 		if (cachedMapColors.length == 0) {
 			return;
@@ -238,7 +321,7 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private void drawBannerAndPosts(DrawContext context, Rect body) {
-		MapBounds bounds = computeMapBounds();
+		MapView bounds = computeMapView(body);
 		for (ArmyLedgerSnapshot.DefenderEntry defender : snapshot.defenders()) {
 			Point post = worldToMap(defender.homePost(), body, bounds);
 			drawDiamond(context, post.x - 6, post.y - 6, 12, MARKER_POST);
@@ -250,7 +333,7 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private void drawGuardMarkers(DrawContext context, Rect body, int mouseX, int mouseY) {
-		MapBounds bounds = computeMapBounds();
+		MapView bounds = computeMapView(body);
 		List<Marker> markers = buildMarkers(body, bounds);
 		for (Marker marker : markers) {
 			ArmyLedgerSnapshot.DefenderEntry defender = snapshot.defenders().get(marker.defenderIndex);
@@ -400,7 +483,7 @@ public class ArmyLedgerScreen extends Screen {
 
 	private int findMarkerHit(double mouseX, double mouseY) {
 		Layout layout = createLayout();
-		List<Marker> markers = buildMarkers(layout.mapBody, computeMapBounds());
+		List<Marker> markers = buildMarkers(layout.mapBody, computeMapView(layout.mapBody));
 		return markers.stream()
 			.filter(marker -> isPointNear(mouseX, mouseY, marker.centerX, marker.centerY, marker.radius + 4))
 			.min(Comparator.comparingDouble(marker -> distanceSquared(mouseX, mouseY, marker.centerX, marker.centerY)))
@@ -577,7 +660,7 @@ public class ArmyLedgerScreen extends Screen {
 		return count;
 	}
 
-	private List<Marker> buildMarkers(Rect body, MapBounds bounds) {
+	private List<Marker> buildMarkers(Rect body, MapView bounds) {
 		List<Marker> markers = new ArrayList<>();
 		for (int i = 0; i < snapshot.defenders().size(); i++) {
 			ArmyLedgerSnapshot.DefenderEntry defender = snapshot.defenders().get(i);
@@ -588,7 +671,7 @@ public class ArmyLedgerScreen extends Screen {
 		return markers;
 	}
 
-	private Point worldToMap(BlockPos pos, Rect body, MapBounds bounds) {
+	private Point worldToMap(BlockPos pos, Rect body, MapView bounds) {
 		float normalizedX = (pos.getX() - bounds.minX) / (float) Math.max(1, bounds.maxX - bounds.minX);
 		float normalizedZ = (pos.getZ() - bounds.minZ) / (float) Math.max(1, bounds.maxZ - bounds.minZ);
 		int x = body.x + Math.round(normalizedX * body.width);
@@ -596,7 +679,7 @@ public class ArmyLedgerScreen extends Screen {
 		return new Point(MathHelper.clamp(x, body.x + 6, body.right() - 6), MathHelper.clamp(y, body.y + 6, body.bottom() - 6));
 	}
 
-	private MapBounds computeMapBounds() {
+	private BaseBounds computeBaseBounds() {
 		int minX = snapshot.bannerPos().getX();
 		int maxX = snapshot.bannerPos().getX();
 		int minZ = snapshot.bannerPos().getZ();
@@ -626,13 +709,27 @@ public class ArmyLedgerScreen extends Screen {
 			minZ -= extra;
 			maxZ += extra;
 		}
-		return new MapBounds(minX, maxX, minZ, maxZ);
+		return new BaseBounds(minX, maxX, minZ, maxZ);
 	}
 
-	private void ensureMapCache(Rect body, MapBounds bounds) {
+	private MapView computeMapView(Rect body) {
+		BaseBounds baseBounds = computeBaseBounds();
+		float aspect = body.width / (float) Math.max(1, body.height);
+		float paddedWidth = Math.max(18.0F, (baseBounds.maxX - baseBounds.minX) + 10.0F);
+		float paddedHeight = Math.max(18.0F, (baseBounds.maxZ - baseBounds.minZ) + 10.0F);
+		float baseWidth = Math.max(paddedWidth, paddedHeight * aspect);
+		float baseHeight = Math.max(paddedHeight, baseWidth / Math.max(0.01F, aspect));
+		float centerX = ((baseBounds.minX + baseBounds.maxX) * 0.5F) + mapPanX;
+		float centerZ = ((baseBounds.minZ + baseBounds.maxZ) * 0.5F) + mapPanZ;
+		float viewWidth = Math.max(12.0F, baseWidth / mapZoom);
+		float viewHeight = Math.max(12.0F, baseHeight / mapZoom);
+		return new MapView(centerX - (viewWidth * 0.5F), centerX + (viewWidth * 0.5F), centerZ - (viewHeight * 0.5F), centerZ + (viewHeight * 0.5F));
+	}
+
+	private void ensureMapCache(Rect body, MapView bounds) {
 		ClientWorld world = this.client == null ? null : this.client.world;
-		int samplesX = MathHelper.clamp(body.width / 10, 28, 64);
-		int samplesZ = MathHelper.clamp(body.height / 10, 20, 48);
+		int samplesX = MathHelper.clamp(Math.round((body.width / 10.0F) * MathHelper.clamp(mapZoom, 1.0F, 3.0F)), 28, 140);
+		int samplesZ = MathHelper.clamp(Math.round((body.height / 10.0F) * MathHelper.clamp(mapZoom, 1.0F, 3.0F)), 20, 110);
 		long tick = world == null ? -1L : world.getTime() / 10L;
 		if (cachedMapBounds != null && cachedMapBounds.equals(bounds) && cachedSamplesX == samplesX && cachedSamplesZ == samplesZ && cachedMapTick == tick) {
 			return;
@@ -655,7 +752,7 @@ public class ArmyLedgerScreen extends Screen {
 		}
 	}
 
-	private int sampleMapColor(ClientWorld world, int x, int z, int fallbackY, MapBounds bounds) {
+	private int sampleMapColor(ClientWorld world, int x, int z, int fallbackY, MapView bounds) {
 		if (world == null) {
 			return 0xFF2B3C2F;
 		}
@@ -716,6 +813,17 @@ public class ArmyLedgerScreen extends Screen {
 		green = MathHelper.clamp(Math.round(green * factor), 0, 255);
 		blue = MathHelper.clamp(Math.round(blue * factor), 0, 255);
 		return (alpha << 24) | (red << 16) | (green << 8) | blue;
+	}
+
+	private void invalidateMapCache() {
+		cachedMapBounds = null;
+		cachedSamplesX = -1;
+		cachedSamplesZ = -1;
+		cachedMapTick = Long.MIN_VALUE;
+	}
+
+	private boolean contains(Rect rect, double mouseX, double mouseY) {
+		return mouseX >= rect.x && mouseX <= rect.right() && mouseY >= rect.y && mouseY <= rect.bottom();
 	}
 
 	private void sendRename() {
@@ -908,7 +1016,10 @@ public class ArmyLedgerScreen extends Screen {
 	private record DetailLayout(Rect titleCard, Rect portraitCard, Rect statsCard, Rect actionsCard) {
 	}
 
-	private record MapBounds(int minX, int maxX, int minZ, int maxZ) {
+	private record BaseBounds(int minX, int maxX, int minZ, int maxZ) {
+	}
+
+	private record MapView(float minX, float maxX, float minZ, float maxZ) {
 	}
 
 	private record Point(int x, int y) {
