@@ -3,6 +3,9 @@ package com.stamperl.agesofsiege.ledger;
 import com.stamperl.agesofsiege.AgesOfSiegeMod;
 import com.stamperl.agesofsiege.defense.DefenderRole;
 import com.stamperl.agesofsiege.defense.DefenderSpawnerService;
+import com.stamperl.agesofsiege.siege.SiegeCatalog;
+import com.stamperl.agesofsiege.siege.SiegeDirector;
+import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
 import com.stamperl.agesofsiege.state.PlacedDefender;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -12,6 +15,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.network.PacketByteBuf;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
@@ -30,6 +34,9 @@ public final class ArmyLedgerService {
 	public static final Identifier RENAME_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_rename");
 	public static final Identifier ROLE_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_role");
 	public static final Identifier LOCATE_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_locate");
+	public static final Identifier LOCK_SIEGE_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_lock_siege");
+	public static final Identifier START_SIEGE_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_start_siege");
+	public static final Identifier CANCEL_SIEGE_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_cancel_siege");
 	private static final List<HighlightState> ACTIVE_HIGHLIGHTS = new ArrayList<>();
 
 	private ArmyLedgerService() {
@@ -56,6 +63,23 @@ public final class ArmyLedgerService {
 			UUID defenderId = buf.readUuid();
 			server.execute(() -> locateDefender(player, defenderId));
 		});
+		ServerPlayNetworking.registerGlobalReceiver(LOCK_SIEGE_PACKET, (server, player, handler, buf, responseSender) -> {
+			String siegeId = buf.readString(64);
+			server.execute(() -> {
+				lockSiege(player, siegeId);
+				openLedger(player);
+			});
+		});
+		ServerPlayNetworking.registerGlobalReceiver(START_SIEGE_PACKET, (server, player, handler, buf, responseSender) ->
+			server.execute(() -> {
+				startSiege(player);
+				openLedger(player);
+			}));
+		ServerPlayNetworking.registerGlobalReceiver(CANCEL_SIEGE_PACKET, (server, player, handler, buf, responseSender) ->
+			server.execute(() -> {
+				cancelStagedSiege(player);
+				openLedger(player);
+			}));
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			Iterator<HighlightState> iterator = ACTIVE_HIGHLIGHTS.iterator();
 			while (iterator.hasNext()) {
@@ -84,13 +108,52 @@ public final class ArmyLedgerService {
 
 	private static ArmyLedgerSnapshot buildSnapshot(ServerPlayerEntity player) {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
-		ServerWorld world = player.getServerWorld();
+		ServerWorld baseWorld = state.getBaseWorld(player.getServer());
+		List<ArmyLedgerSnapshot.DefenderEntry> defenders = buildDefenderEntries(player, state);
+		List<ArmyLedgerSnapshot.SiegeEntry> sieges = buildSiegeEntries(state);
+		SiegeCatalog.SiegeDefinition selectedSiege = resolveSelectedSiege(state);
+		String phase = state.getActiveSession() == null ? "at peace" : state.getActiveSession().getPhase().name().toLowerCase(Locale.ROOT);
+		boolean objectivePresent = isObjectivePresent(baseWorld, state);
+		boolean hasRally = state.getRallyPoint() != null;
+		boolean rallyPresent = isRallyPresent(baseWorld, state);
+		boolean siegeLocked = state.getActiveSession() != null && state.getActiveSession().getPhase() == SiegePhase.STAGED;
+		boolean canStartSiege = siegeLocked && objectivePresent;
+		boolean canLockSiege = state.hasBase()
+			&& objectivePresent
+			&& rallyPresent
+			&& state.getActiveSession() == null
+			&& selectedSiege != null
+			&& selectedSiege.isUnlocked(state.getCompletedSieges());
+		String siegeStatus = buildSiegeStatus(state, selectedSiege, siegeLocked, objectivePresent, rallyPresent);
+		return new ArmyLedgerSnapshot(
+			state.hasBase(),
+			state.getBasePos(),
+			hasRally,
+			hasRally ? state.getRallyPoint() : BlockPos.ORIGIN,
+			state.getDimensionId(),
+			state.getClaimedBy(),
+			state.getObjectiveHealth(),
+			state.getMaxObjectiveHealth(),
+			phase,
+			state.getAgeLevel(),
+			state.getAgeName(),
+			state.getCompletedSieges(),
+			state.getNextAgeSiegeRequirement(),
+			selectedSiege == null ? "" : selectedSiege.id(),
+			siegeLocked,
+			canLockSiege,
+			canStartSiege,
+			siegeStatus,
+			sieges,
+			defenders
+		);
+	}
+
+	private static List<ArmyLedgerSnapshot.DefenderEntry> buildDefenderEntries(ServerPlayerEntity player, SiegeBaseState state) {
 		List<ArmyLedgerSnapshot.DefenderEntry> defenders = new ArrayList<>();
 		for (PlacedDefender defender : state.getPlacedDefenders()) {
-			Entity entity = world.getServer().getWorld(world.getRegistryKey()) == null ? null : world.getServer().getWorld(world.getRegistryKey()).getEntity(defender.entityUuid());
-			if (entity == null && player.getServer().getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, new Identifier(defender.dimensionId()))) != null) {
-				entity = player.getServer().getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, new Identifier(defender.dimensionId()))).getEntity(defender.entityUuid());
-			}
+			ServerWorld defenderWorld = player.getServer().getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, new Identifier(defender.dimensionId())));
+			Entity entity = defenderWorld == null ? null : defenderWorld.getEntity(defender.entityUuid());
 			LivingEntity living = entity instanceof LivingEntity candidate ? candidate : null;
 			BlockPos currentPos = living == null ? defender.homePost() : living.getBlockPos();
 			float health = living == null ? 0.0F : living.getHealth();
@@ -112,24 +175,128 @@ public final class ArmyLedgerService {
 				living != null && living.isAlive()
 			));
 		}
+		return defenders;
+	}
 
-		String phase = state.getActiveSession() == null ? "at peace" : state.getActiveSession().getPhase().name().toLowerCase(Locale.ROOT);
-		return new ArmyLedgerSnapshot(
-			state.hasBase(),
-			state.getBasePos(),
-			state.getDimensionId(),
-			state.getClaimedBy(),
-			state.getObjectiveHealth(),
-			state.getMaxObjectiveHealth(),
-			phase,
-			defenders
-		);
+	private static List<ArmyLedgerSnapshot.SiegeEntry> buildSiegeEntries(SiegeBaseState state) {
+		List<ArmyLedgerSnapshot.SiegeEntry> sieges = new ArrayList<>();
+		for (SiegeCatalog.SiegeDefinition definition : SiegeCatalog.all()) {
+			sieges.add(new ArmyLedgerSnapshot.SiegeEntry(
+				definition.id(),
+				definition.displayName(),
+				definition.description(),
+				definition.ageLevel(),
+				definition.unlockVictories(),
+				definition.waveSize(),
+				definition.isUnlocked(state.getCompletedSieges()),
+				definition.ageLevel() < state.getAgeLevel(),
+				definition.hasRam(),
+				definition.enemySummary(),
+				definition.weaponSummary(),
+				definition.threatSummary(),
+				definition.warSuppliesReward()
+			));
+		}
+		return sieges;
+	}
+
+	private static String buildSiegeStatus(
+		SiegeBaseState state,
+		SiegeCatalog.SiegeDefinition selectedSiege,
+		boolean siegeLocked,
+		boolean objectivePresent,
+		boolean rallyPresent
+	) {
+		if (!state.hasBase()) {
+			return "Place a Settlement Standard to unlock campaign planning.";
+		}
+		if (!objectivePresent) {
+			return "Replace the Settlement Standard before locking or starting a siege.";
+		}
+		if (state.getRallyPoint() == null || !rallyPresent) {
+			return "Place a Raid Rally Banner to define the attacker formation point.";
+		}
+		if (state.getActiveSession() != null && state.getActiveSession().getPhase() != SiegePhase.STAGED) {
+			return "A siege is already active. Finish it before planning another.";
+		}
+		if (siegeLocked) {
+			return "Formation locked. The wave is staged at the rally point and waiting for Start Siege.";
+		}
+		if (selectedSiege == null) {
+			return "No siege operation is currently selected.";
+		}
+		if (!selectedSiege.isUnlocked(state.getCompletedSieges())) {
+			return "That siege unlocks after " + selectedSiege.unlockVictories() + " total victories.";
+		}
+		if (selectedSiege.ageLevel() < state.getAgeLevel()) {
+			return "Replay selected. Rewards still drop, but settlement age progress will not advance.";
+		}
+		return "Select Lock Siege when your defenses are in place.";
+	}
+
+	private static SiegeCatalog.SiegeDefinition resolveSelectedSiege(SiegeBaseState state) {
+		SiegeCatalog.SiegeDefinition selected = SiegeCatalog.byId(state.getSelectedSiegeId());
+		if (selected != null) {
+			return selected;
+		}
+		return SiegeCatalog.highestUnlocked(state.getCompletedSieges());
+	}
+
+	private static void lockSiege(ServerPlayerEntity player, String siegeId) {
+		SiegeBaseState state = SiegeBaseState.get(player.getServer());
+		if (!canManageSieges(player, state)) {
+			return;
+		}
+		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.byId(siegeId);
+		if (definition == null) {
+			player.sendMessage(Text.literal("That siege plan could not be found.").formatted(Formatting.RED), true);
+			return;
+		}
+		if (!definition.isUnlocked(state.getCompletedSieges())) {
+			player.sendMessage(Text.literal("That siege is not unlocked yet.").formatted(Formatting.RED), true);
+			return;
+		}
+		state.setSelectedSiegeId(definition.id());
+		if (!SiegeDirector.lockSiegeFromLedger(player.getServer(), state, definition)) {
+			player.sendMessage(Text.literal("Could not lock that siege. Check the settlement banner, rally banner, and current siege state.").formatted(Formatting.RED), true);
+			return;
+		}
+		player.sendMessage(Text.literal(definition.displayName() + " locked. The enemy formation is waiting at the rally point.").formatted(Formatting.GOLD), true);
+	}
+
+	private static void startSiege(ServerPlayerEntity player) {
+		SiegeBaseState state = SiegeBaseState.get(player.getServer());
+		if (!canManageSieges(player, state)) {
+			return;
+		}
+		ServerWorld baseWorld = state.getBaseWorld(player.getServer());
+		if (!isObjectivePresent(baseWorld, state)) {
+			player.sendMessage(Text.literal("Replace the Settlement Standard before starting the locked siege.").formatted(Formatting.RED), true);
+			return;
+		}
+		if (!SiegeDirector.startLockedSiege(player.getServer(), state)) {
+			player.sendMessage(Text.literal("There is no locked siege ready to start.").formatted(Formatting.RED), true);
+			return;
+		}
+		player.sendMessage(Text.literal("Siege started. Hold the line.").formatted(Formatting.GOLD), true);
+	}
+
+	private static void cancelStagedSiege(ServerPlayerEntity player) {
+		SiegeBaseState state = SiegeBaseState.get(player.getServer());
+		if (!canManageSieges(player, state)) {
+			return;
+		}
+		if (!SiegeDirector.cancelLockedSiege(player.getServer(), state)) {
+			player.sendMessage(Text.literal("There is no locked siege to stand down.").formatted(Formatting.RED), true);
+			return;
+		}
+		player.sendMessage(Text.literal("Locked siege stood down.").formatted(Formatting.GOLD), true);
 	}
 
 	private static void renameDefender(ServerPlayerEntity player, UUID defenderId, String requestedName) {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
 		PlacedDefender placedDefender = state.getPlacedDefender(defenderId);
-		if (!canManage(player, placedDefender)) {
+		if (!canManageDefender(player, placedDefender)) {
 			return;
 		}
 		String trimmed = requestedName == null ? "" : requestedName.trim();
@@ -159,7 +326,7 @@ public final class ArmyLedgerService {
 	private static void changeRole(ServerPlayerEntity player, UUID defenderId, String requestedRole) {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
 		PlacedDefender placedDefender = state.getPlacedDefender(defenderId);
-		if (!canManage(player, placedDefender)) {
+		if (!canManageDefender(player, placedDefender)) {
 			return;
 		}
 		DefenderRole newRole = DefenderRole.from(requestedRole);
@@ -194,7 +361,7 @@ public final class ArmyLedgerService {
 		));
 	}
 
-	private static boolean canManage(ServerPlayerEntity player, PlacedDefender placedDefender) {
+	private static boolean canManageDefender(ServerPlayerEntity player, PlacedDefender placedDefender) {
 		if (placedDefender == null) {
 			player.sendMessage(Text.literal("That defender is no longer bound.").formatted(Formatting.RED), true);
 			return false;
@@ -206,10 +373,35 @@ public final class ArmyLedgerService {
 		return true;
 	}
 
+	private static boolean canManageSieges(ServerPlayerEntity player, SiegeBaseState state) {
+		if (!state.hasBase()) {
+			player.sendMessage(Text.literal("Place a Settlement Standard first.").formatted(Formatting.RED), true);
+			return false;
+		}
+		if (!player.hasPermissionLevel(2) && !state.getClaimedBy().equalsIgnoreCase(player.getGameProfile().getName())) {
+			player.sendMessage(Text.literal("Only the settlement owner can command this siege plan.").formatted(Formatting.RED), true);
+			return false;
+		}
+		return true;
+	}
+
+	private static boolean isObjectivePresent(ServerWorld baseWorld, SiegeBaseState state) {
+		return state.hasBase()
+			&& baseWorld != null
+			&& baseWorld.getBlockState(state.getBasePos()).isIn(BlockTags.BANNERS);
+	}
+
+	private static boolean isRallyPresent(ServerWorld baseWorld, SiegeBaseState state) {
+		return state.getRallyPoint() != null
+			&& baseWorld != null
+			&& (baseWorld.getBlockState(state.getRallyPoint()).isOf(net.minecraft.block.Blocks.RED_BANNER)
+			|| baseWorld.getBlockState(state.getRallyPoint()).isOf(net.minecraft.block.Blocks.RED_WALL_BANNER));
+	}
+
 	private static void locateDefender(ServerPlayerEntity player, UUID defenderId) {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
 		PlacedDefender placedDefender = state.getPlacedDefender(defenderId);
-		if (!canManage(player, placedDefender)) {
+		if (!canManageDefender(player, placedDefender)) {
 			return;
 		}
 		ServerWorld defenderWorld = player.getServer().getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, new Identifier(placedDefender.dimensionId())));

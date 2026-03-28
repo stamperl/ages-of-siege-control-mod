@@ -45,6 +45,17 @@ public final class SiegeDirector {
 	}
 
 	public static boolean startSiege(MinecraftServer server, SiegeBaseState state) {
+		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.byId(state.getSelectedSiegeId());
+		if (definition == null || !definition.isUnlocked(state.getCompletedSieges())) {
+			definition = SiegeCatalog.highestUnlocked(state.getCompletedSieges());
+		}
+		if (!lockSiegeFromLedger(server, state, definition)) {
+			return false;
+		}
+		return startLockedSiege(server, state);
+	}
+
+	public static boolean lockSiegeFromLedger(MinecraftServer server, SiegeBaseState state, SiegeCatalog.SiegeDefinition definition) {
 		if (!state.hasBase() || state.getActiveSession() != null) {
 			return false;
 		}
@@ -59,9 +70,43 @@ public final class SiegeDirector {
 		if (rally == null || !isRallyMarkerPresent(world, rally)) {
 			return false;
 		}
+		state.setSelectedSiegeId(definition.id());
+		state.prepareStagedSiege(server, definition.id(), definition.ageLevel());
+		SPAWNER.spawnWave(server, world, state, state.getActiveSession(), definition);
+		return true;
+	}
 
-		state.beginCountdown(server, 10);
-		SPAWNER.spawnWave(server, world, state, state.getActiveSession());
+	public static boolean startLockedSiege(MinecraftServer server, SiegeBaseState state) {
+		if (state.getActiveSession() == null || state.getActiveSession().getPhase() != SiegePhase.STAGED) {
+			return false;
+		}
+		ServerWorld world = state.getBaseWorld(server);
+		if (world == null) {
+			return false;
+		}
+		BlockPos objectivePos = state.getActiveSession().getObjectivePos() == null ? state.getBasePos() : state.getActiveSession().getObjectivePos();
+		if (!OBJECTIVE_SERVICE.isObjectivePresent(world, state.getActiveSession(), objectivePos)) {
+			return false;
+		}
+		SiegeSession refreshed = refreshLivingEntities(world, state, state.getActiveSession());
+		if (!hasTrackedUnits(refreshed)) {
+			state.endSiege(false, false);
+			return false;
+		}
+		state.activateStagedSiege(server);
+		return true;
+	}
+
+	public static boolean cancelLockedSiege(MinecraftServer server, SiegeBaseState state) {
+		if (state.getActiveSession() == null || state.getActiveSession().getPhase() != SiegePhase.STAGED) {
+			return false;
+		}
+		ServerWorld world = state.getBaseWorld(server);
+		if (world != null) {
+			SPAWNER.despawnAttackers(world, state.getAttackerIds());
+			SPAWNER.despawnRams(world, state.getRamIds());
+		}
+		state.endSiege(false, false);
 		return true;
 	}
 
@@ -79,6 +124,9 @@ public final class SiegeDirector {
 		}
 
 		BlockPos objectivePos = session.getObjectivePos() == null ? state.getBasePos() : session.getObjectivePos();
+		if (!world.isChunkLoaded(objectivePos)) {
+			return;
+		}
 		if (!OBJECTIVE_SERVICE.isObjectivePresent(world, session, objectivePos)) {
 			transitionToDefeat(world, state, "The Settlement Standard was destroyed. The siege is lost.");
 			return;
@@ -98,10 +146,20 @@ public final class SiegeDirector {
 		}
 
 		UNIT_CONTROLLER.dispatch(world, state, session);
+		if (session.getPhase() == SiegePhase.STAGED) {
+			if (!hasTrackedUnits(session)) {
+				state.endSiege(false, false);
+			}
+			return;
+		}
 		resolveOutcome(world, server, state, session, objectivePos);
 	}
 
 	private static SiegeSession refreshLivingEntities(ServerWorld world, SiegeBaseState state, SiegeSession session) {
+		BlockPos trackingAnchor = trackingAnchor(session);
+		if (trackingAnchor != null && !world.isChunkLoaded(trackingAnchor)) {
+			return session;
+		}
 		List<UUID> livingAttackers = new ArrayList<>();
 		for (UUID attackerId : session.getAttackerIds()) {
 			Entity entity = world.getEntity(attackerId);
@@ -132,7 +190,7 @@ public final class SiegeDirector {
 	}
 
 	private static SiegeSession refreshPlanIfNeeded(ServerWorld world, SiegeBaseState state, SiegeSession session, BlockPos objectivePos) {
-		if (session.getPhase() == SiegePhase.COUNTDOWN || session.getPhase() == SiegePhase.VICTORY || session.getPhase() == SiegePhase.DEFEAT) {
+		if (session.getPhase() == SiegePhase.STAGED || session.getPhase() == SiegePhase.COUNTDOWN || session.getPhase() == SiegePhase.VICTORY || session.getPhase() == SiegePhase.DEFEAT) {
 			return session;
 		}
 		if (session.getPhase() == SiegePhase.BREACH && session.getCurrentPlan() != null) {
@@ -214,13 +272,31 @@ public final class SiegeDirector {
 		}
 		if (session.getAttackerIds().isEmpty() && session.getEngineIds().isEmpty()) {
 			int previousAge = state.getAgeLevel();
-			REWARDS.dropVictoryRewards(world, session, objectivePos, state.getAgeLevel());
-			state.endSiege(false, true);
-			server.getPlayerManager().broadcast(Text.literal("The siege wave has been defeated."), false);
-			if (state.getAgeLevel() > previousAge) {
+			int siegeAgeLevel = session.getSessionAgeLevel();
+			boolean rewardProgress = siegeAgeLevel >= previousAge;
+			REWARDS.dropVictoryRewards(world, session, objectivePos, siegeAgeLevel, state.getSelectedSiegeId());
+			state.endSiege(false, rewardProgress);
+			server.getPlayerManager().broadcast(Text.literal(rewardProgress
+				? "The siege wave has been defeated."
+				: "Replay siege defeated. Settlement progress unchanged."), false);
+			if (rewardProgress && state.getAgeLevel() > previousAge) {
 				server.getPlayerManager().broadcast(Text.literal("Age advanced: " + state.getAgeName() + " unlocked."), false);
 			}
 		}
+	}
+
+	private static boolean hasTrackedUnits(SiegeSession session) {
+		return session != null && (!session.getAttackerIds().isEmpty() || !session.getEngineIds().isEmpty());
+	}
+
+	private static BlockPos trackingAnchor(SiegeSession session) {
+		if (session == null) {
+			return null;
+		}
+		return switch (session.getPhase()) {
+			case STAGED, COUNTDOWN, FORM_UP -> session.getSpawnCenter() != null ? session.getSpawnCenter() : session.getRallyPos();
+			default -> session.getObjectivePos() != null ? session.getObjectivePos() : session.getSpawnCenter();
+		};
 	}
 
 	private static void announceCountdownIfNeeded(MinecraftServer server, SiegeSession session, long now) {

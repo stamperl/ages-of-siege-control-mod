@@ -50,7 +50,7 @@ public final class ObjectiveService {
 			return;
 		}
 
-		if (state.isSiegeActive()) {
+		if (state.getActiveSession() != null) {
 			spawner.despawnAttackers(world, state.getAttackerIds());
 			spawner.despawnRams(world, state.getRamIds());
 			state.endSiege(true, false);

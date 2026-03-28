@@ -3,6 +3,8 @@ package com.stamperl.agesofsiege.siege.service;
 import com.stamperl.agesofsiege.entity.ModEntities;
 import com.stamperl.agesofsiege.entity.SiegeRamEntity;
 import com.stamperl.agesofsiege.siege.MedievalLoadouts;
+import com.stamperl.agesofsiege.siege.SiegeCatalog;
+import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
 import com.stamperl.agesofsiege.siege.runtime.SiegeSession;
 import com.stamperl.agesofsiege.siege.runtime.UnitRole;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
@@ -35,15 +37,24 @@ public final class SiegeSpawner {
 	private final Random siegeRandom = Random.create();
 
 	public void spawnWave(MinecraftServer server, ServerWorld world, SiegeBaseState state, SiegeSession session) {
+		int siegeAgeLevel = session == null ? state.getAgeLevel() : session.getSessionAgeLevel();
+		int waveSize = session == null ? getWaveSize(state.getCompletedSieges()) : getWaveSize(session.getSessionVictoryCount());
+		spawnWave(server, world, state, session, siegeAgeLevel, waveSize);
+	}
+
+	public void spawnWave(MinecraftServer server, ServerWorld world, SiegeBaseState state, SiegeSession session, SiegeCatalog.SiegeDefinition definition) {
+		spawnWave(server, world, state, session, definition.ageLevel(), definition.waveSize());
+	}
+
+	private void spawnWave(MinecraftServer server, ServerWorld world, SiegeBaseState state, SiegeSession session, int siegeAgeLevel, int waveSize) {
 		BlockPos basePos = state.getBasePos();
-		int waveSize = getWaveSize(state);
 		FormationSpawn formation = createFormationSpawn(world, state, basePos);
 		List<UUID> spawnedAttackers = new ArrayList<>();
 		List<UUID> spawnedRams = new ArrayList<>();
 		Map<UUID, UnitRole> roleAssignments = new HashMap<>();
 		for (int i = 0; i < waveSize; i++) {
 			BlockPos spawnPos = formation.positionFor(world, i);
-			HostileEntity attacker = createAttacker(world, state, i);
+			HostileEntity attacker = createAttacker(world, siegeAgeLevel, i);
 			if (attacker == null) {
 				continue;
 			}
@@ -57,25 +68,25 @@ public final class SiegeSpawner {
 			);
 			attacker.setCanPickUpLoot(false);
 			attacker.setPersistent();
-			equipAttacker(attacker, state);
+			equipAttacker(attacker, siegeAgeLevel);
 			world.spawnEntity(attacker);
 			spawnedAttackers.add(attacker.getUuid());
 			roleAssignments.put(attacker.getUuid(), attacker instanceof VindicatorEntity ? UnitRole.BREACHER : UnitRole.RANGED);
 		}
 
-		if (state.getAgeLevel() >= 2) {
+		if (siegeAgeLevel >= 2) {
 			BlockPos ramSpawn = formation.ramPosition(world);
 			SiegeRamEntity ram = createBatteringRam(world, ramSpawn);
 			if (ram != null) {
 				world.spawnEntity(ram);
 				spawnedRams.add(ram.getUuid());
 				roleAssignments.put(ram.getUuid(), UnitRole.RAM);
-				spawnedAttackers.addAll(spawnRamEscort(world, state, ramSpawn, roleAssignments));
+				spawnedAttackers.addAll(spawnRamEscort(world, siegeAgeLevel, ramSpawn, roleAssignments));
 			}
 		}
 
 		if (spawnedAttackers.isEmpty() && spawnedRams.isEmpty()) {
-			state.endSiege(true, false);
+			state.endSiege(session != null && session.getPhase() != SiegePhase.STAGED, false);
 			server.getPlayerManager().broadcast(Text.literal("The siege could not assemble an attacking wave."), false);
 			return;
 		}
@@ -101,27 +112,26 @@ public final class SiegeSpawner {
 		}
 	}
 
-	private int getWaveSize(SiegeBaseState state) {
-		return 6 + Math.min(state.getCompletedSieges(), 8);
+	private int getWaveSize(int victoryCount) {
+		return 6 + Math.min(victoryCount, 8);
 	}
 
-	private HostileEntity createAttacker(ServerWorld world, SiegeBaseState state, int index) {
-		int age = state.getAgeLevel();
-		if (age <= 0) {
+	private HostileEntity createAttacker(ServerWorld world, int siegeAgeLevel, int index) {
+		if (siegeAgeLevel <= 0) {
 			return EntityType.PILLAGER.create(world);
 		}
-		if (age == 1) {
+		if (siegeAgeLevel == 1) {
 			return index % 3 == 0 ? EntityType.VINDICATOR.create(world) : EntityType.PILLAGER.create(world);
 		}
-		if (age == 2) {
+		if (siegeAgeLevel == 2) {
 			return index % 2 == 0 ? EntityType.VINDICATOR.create(world) : EntityType.PILLAGER.create(world);
 		}
 		return index % 3 == 2 ? EntityType.PILLAGER.create(world) : EntityType.VINDICATOR.create(world);
 	}
 
-	private List<UUID> spawnRamEscort(ServerWorld world, SiegeBaseState state, BlockPos ramSpawn, Map<UUID, UnitRole> roleAssignments) {
+	private List<UUID> spawnRamEscort(ServerWorld world, int siegeAgeLevel, BlockPos ramSpawn, Map<UUID, UnitRole> roleAssignments) {
 		List<UUID> escortIds = new ArrayList<>();
-		int escortCount = state.getAgeLevel() >= 3 ? 3 : 2;
+		int escortCount = siegeAgeLevel >= 3 ? 3 : 2;
 		for (int i = 0; i < escortCount; i++) {
 			HostileEntity escort = i == escortCount - 1
 				? EntityType.PILLAGER.create(world)
@@ -142,7 +152,7 @@ public final class SiegeSpawner {
 			escort.addCommandTag(RAM_ESCORT_TAG);
 			escort.setCanPickUpLoot(false);
 			escort.setPersistent();
-			equipAttacker(escort, state);
+			equipAttacker(escort, siegeAgeLevel);
 			world.spawnEntity(escort);
 			escortIds.add(escort.getUuid());
 			roleAssignments.put(escort.getUuid(), UnitRole.ESCORT);
@@ -150,12 +160,12 @@ public final class SiegeSpawner {
 		return escortIds;
 	}
 
-	private void equipAttacker(HostileEntity attacker, SiegeBaseState state) {
+	private void equipAttacker(HostileEntity attacker, int siegeAgeLevel) {
 		MedievalLoadouts.RaiderRole role = attacker instanceof VindicatorEntity
 			? MedievalLoadouts.RaiderRole.BREACHER
 			: MedievalLoadouts.RaiderRole.RANGED;
 		attacker.addCommandTag(role == MedievalLoadouts.RaiderRole.BREACHER ? BREACHER_ROLE_TAG : RANGED_ROLE_TAG);
-		MedievalLoadouts.equipAttacker(attacker, role, state.getAgeLevel(), attacker.getRandom());
+		MedievalLoadouts.equipAttacker(attacker, role, siegeAgeLevel, attacker.getRandom());
 	}
 
 	private SiegeRamEntity createBatteringRam(ServerWorld world, BlockPos spawnPos) {

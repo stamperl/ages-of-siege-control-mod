@@ -2,6 +2,7 @@ package com.stamperl.agesofsiege.siege.service;
 
 import com.stamperl.agesofsiege.item.ModItems;
 import com.stamperl.agesofsiege.siege.MedievalLoadouts;
+import com.stamperl.agesofsiege.siege.SiegeCatalog;
 import com.stamperl.agesofsiege.siege.runtime.SiegeSession;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
@@ -13,10 +14,12 @@ import net.minecraft.util.math.random.Random;
 public final class SiegeRewardService {
 	private final Random rewardRandom = Random.create();
 
-	public void dropVictoryRewards(ServerWorld world, SiegeSession session, BlockPos objectivePos, int ageLevel) {
+	public void dropVictoryRewards(ServerWorld world, SiegeSession session, BlockPos objectivePos, int ageLevel, String siegeId) {
+		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.byId(siegeId);
+		int warSupplies = definition == null ? 3 + ageLevel : definition.warSuppliesReward();
 		spawnReward(world, objectivePos, new ItemStack(Items.BREAD, 4));
 		spawnReward(world, objectivePos, new ItemStack(Items.IRON_INGOT, 6 + (ageLevel * 2)));
-		spawnReward(world, objectivePos, new ItemStack(ModItems.WAR_SUPPLIES, 3 + ageLevel));
+		spawnReward(world, objectivePos, new ItemStack(ModItems.WAR_SUPPLIES, warSupplies));
 		for (ItemStack stack : MedievalLoadouts.getVictoryRewards(ageLevel, rewardRandom)) {
 			spawnReward(world, objectivePos, stack);
 		}

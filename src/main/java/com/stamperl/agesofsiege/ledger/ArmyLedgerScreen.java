@@ -73,14 +73,22 @@ public class ArmyLedgerScreen extends Screen {
 	private static final int SAMPLE_CROP = 7;
 
 	private static UUID lastSelectedDefenderId;
+	private static LedgerMode lastLedgerMode = LedgerMode.DEFENDERS;
 
 	private final ArmyLedgerSnapshot snapshot;
 
 	private int selectedIndex = -1;
+	private int selectedSiegeIndex = -1;
 	private TextFieldWidget nameField;
 	private ButtonWidget renameButton;
 	private ButtonWidget cycleRoleButton;
 	private ButtonWidget locateButton;
+	private ButtonWidget defendersTabButton;
+	private ButtonWidget siegesTabButton;
+	private ButtonWidget previousSiegeButton;
+	private ButtonWidget nextSiegeButton;
+	private ButtonWidget lockSiegeButton;
+	private ButtonWidget startSiegeButton;
 
 	private MapView cachedMapBounds;
 	private int[] cachedMapColors = new int[0];
@@ -96,6 +104,7 @@ public class ArmyLedgerScreen extends Screen {
 	private double mapDragLastY;
 	private boolean detailDrawerOpen = true;
 	private int detailScroll;
+	private LedgerMode ledgerMode = LedgerMode.DEFENDERS;
 
 	private enum LayoutDensity {
 		COMPACT,
@@ -109,6 +118,11 @@ public class ArmyLedgerScreen extends Screen {
 		DRAWER
 	}
 
+	private enum LedgerMode {
+		DEFENDERS,
+		SIEGES
+	}
+
 	public ArmyLedgerScreen(ArmyLedgerSnapshot snapshot) {
 		super(Text.literal("Army Command Table"));
 		this.snapshot = snapshot;
@@ -118,6 +132,7 @@ public class ArmyLedgerScreen extends Screen {
 	protected void init() {
 		super.init();
 		selectInitialGuard();
+		selectInitialSiege();
 
 		this.nameField = new TextFieldWidget(this.textRenderer, 0, 0, 120, 20, Text.literal("Guard Name"));
 		this.nameField.setMaxLength(32);
@@ -129,8 +144,22 @@ public class ArmyLedgerScreen extends Screen {
 			.dimensions(0, 0, 90, 20).build());
 		this.locateButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Locate"), button -> sendLocate())
 			.dimensions(0, 0, 90, 20).build());
+		this.defendersTabButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Defenders"), button -> setLedgerMode(LedgerMode.DEFENDERS))
+			.dimensions(0, 0, 88, 20).build());
+		this.siegesTabButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Sieges"), button -> setLedgerMode(LedgerMode.SIEGES))
+			.dimensions(0, 0, 88, 20).build());
+		this.previousSiegeButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Previous"), button -> cycleSiegeSelection(-1))
+			.dimensions(0, 0, 90, 20).build());
+		this.nextSiegeButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Next"), button -> cycleSiegeSelection(1))
+			.dimensions(0, 0, 90, 20).build());
+		this.lockSiegeButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Lock Siege"), button -> sendLockOrCancelSiege())
+			.dimensions(0, 0, 120, 20).build());
+		this.startSiegeButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Start Siege"), button -> sendStartSiege())
+			.dimensions(0, 0, 120, 20).build());
 
 		detailDrawerOpen = createLayout().mode != LayoutMode.DRAWER;
+		ledgerMode = defaultLedgerMode();
+		lastLedgerMode = ledgerMode;
 		refreshNameField();
 		syncWidgetLayout();
 		refreshControls();
@@ -155,6 +184,14 @@ public class ArmyLedgerScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
+		if (ledgerMode == LedgerMode.SIEGES) {
+			int siegeIndex = findSiegeHit(mouseX, mouseY);
+			if (siegeIndex >= 0) {
+				selectSiege(siegeIndex);
+				return true;
+			}
+			return super.mouseClicked(mouseX, mouseY, button);
+		}
 		int markerIndex = findMarkerHit(mouseX, mouseY);
 		if (markerIndex >= 0) {
 			selectDefender(markerIndex);
@@ -183,6 +220,9 @@ public class ArmyLedgerScreen extends Screen {
 
 	@Override
 	public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+		if (ledgerMode == LedgerMode.SIEGES) {
+			return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
+		}
 		if (!mapDragging || button != 0) {
 			return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
 		}
@@ -201,6 +241,9 @@ public class ArmyLedgerScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double verticalAmount) {
+		if (ledgerMode == LedgerMode.SIEGES) {
+			return super.mouseScrolled(mouseX, mouseY, verticalAmount);
+		}
 		Layout layout = createLayout();
 		if (layout.detailVisible && layout.mode == LayoutMode.DRAWER && contains(layout.detailBody, mouseX, mouseY)) {
 			int maxScroll = getDetailScrollMax(layout);
@@ -315,6 +358,12 @@ public class ArmyLedgerScreen extends Screen {
 		context.drawBorder(rect.x, rect.y, rect.width, rect.height, CARD_BORDER);
 		drawScaledText(context, "Army Command Table", rect.x + 10, rect.y + 8, TEXT_PRIMARY, titleScale(layout.density));
 		drawTrimmed(context, "Banner " + snapshot.bannerPos().toShortString(), rect.x + 10, rect.y + 30, rect.width - 20, TEXT_SECONDARY);
+		if (rect.height >= 52) {
+			String progress = snapshot.nextAgeRequirement() < 0
+				? snapshot.currentAgeName() + " age maxed"
+				: snapshot.completedSieges() + "/" + snapshot.nextAgeRequirement() + " victories to next age";
+			drawTrimmed(context, progress, rect.x + 10, rect.y + 46, rect.width - 20, TEXT_MUTED);
+		}
 	}
 
 	private void drawInfoCard(DrawContext context, Rect rect, String label, String value) {
@@ -325,6 +374,10 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private void drawMapPanel(DrawContext context, Layout layout, int mouseX, int mouseY) {
+		if (ledgerMode == LedgerMode.SIEGES) {
+			drawSiegeListPanel(context, layout, mouseX, mouseY);
+			return;
+		}
 		Rect panel = layout.mapPanel;
 		Rect body = layout.mapBody;
 		context.fill(panel.x, panel.y, panel.right(), panel.bottom(), PANEL_COLOR);
@@ -451,6 +504,10 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private void drawDetailPanel(DrawContext context, Layout layout, int mouseX, int mouseY) {
+		if (ledgerMode == LedgerMode.SIEGES) {
+			drawSiegeDetailPanel(context, layout);
+			return;
+		}
 		Rect panel = layout.detailPanel;
 		Rect body = layout.detailBody;
 		context.fill(panel.x, panel.y, panel.right(), panel.bottom(), PANEL_COLOR);
@@ -505,6 +562,92 @@ public class ArmyLedgerScreen extends Screen {
 			context.disableScissor();
 			drawDetailScrollbar(context, layout, detailLayout);
 		}
+	}
+
+	private void drawSiegeListPanel(DrawContext context, Layout layout, int mouseX, int mouseY) {
+		Rect panel = layout.mapPanel;
+		Rect body = layout.mapBody;
+		context.fill(panel.x, panel.y, panel.right(), panel.bottom(), PANEL_COLOR);
+		context.drawBorder(panel.x, panel.y, panel.width, panel.height, PANEL_BORDER);
+		context.fill(panel.x, panel.y, panel.right(), panel.y + PANEL_HEADER_HEIGHT, PANEL_HEADER_COLOR);
+		context.fill(panel.x + 12, panel.y + PANEL_HEADER_HEIGHT, panel.right() - 12, panel.y + PANEL_HEADER_HEIGHT + 1, CARD_BORDER);
+		drawTrimmed(context, "Siege Campaign", panel.x + 14, panel.y + 13, 220, TEXT_PRIMARY);
+		drawScaledText(context, "Select an operation and review the threat before locking it in.", panel.right() - 250, panel.y + 15, TEXT_SECONDARY, metaScale(layout.density));
+
+		for (int i = 0; i < snapshot.sieges().size(); i++) {
+			Rect card = siegeCardRect(body, i);
+			ArmyLedgerSnapshot.SiegeEntry siege = snapshot.sieges().get(i);
+			boolean selected = i == selectedSiegeIndex;
+			int border = selected ? MARKER_SELECTED : CARD_BORDER;
+			int fill = siege.unlocked() ? CARD_COLOR : 0x18222830;
+			context.fill(card.x, card.y, card.right(), card.bottom(), fill);
+			context.drawBorder(card.x, card.y, card.width, card.height, border);
+
+			drawTrimmed(context, siege.name(), card.x + 12, card.y + 10, card.width - 24, siege.unlocked() ? TEXT_PRIMARY : TEXT_MUTED);
+			String status = siege.unlocked()
+				? (siege.replay() ? "Replay" : "Current Tier")
+				: "Unlocks at " + siege.unlockVictories() + " victories";
+			drawScaledText(context, status, card.x + 12, card.y + 28, siege.unlocked() ? TEXT_WARM : TEXT_MUTED, metaScale(layout.density));
+			drawTrimmed(context, siege.enemySummary(), card.x + 12, card.y + 42, card.width - 24, TEXT_SECONDARY);
+
+			if (selected || contains(card, mouseX, mouseY)) {
+				context.fill(card.right() - 24, card.y + 10, card.right() - 10, card.y + 24, 0x24161F27);
+				drawScaledText(context, Integer.toString(siege.waveSize()), card.right() - 21, card.y + 13, TEXT_PRIMARY, metaScale(layout.density));
+			}
+		}
+	}
+
+	private void drawSiegeDetailPanel(DrawContext context, Layout layout) {
+		Rect panel = layout.detailPanel;
+		Rect body = layout.detailBody;
+		context.fill(panel.x, panel.y, panel.right(), panel.bottom(), PANEL_COLOR);
+		context.drawBorder(panel.x, panel.y, panel.width, panel.height, PANEL_BORDER);
+		context.fill(panel.x, panel.y, panel.right(), panel.y + PANEL_HEADER_HEIGHT, PANEL_HEADER_COLOR);
+		context.fill(panel.x + 12, panel.y + PANEL_HEADER_HEIGHT, panel.right() - 12, panel.y + PANEL_HEADER_HEIGHT + 1, CARD_BORDER);
+		drawTrimmed(context, "Siege Overview", panel.x + 14, panel.y + 13, 180, TEXT_PRIMARY);
+		drawScaledText(context, "Plan, lock, and start from here.", panel.right() - 140, panel.y + 15, TEXT_SECONDARY, metaScale(layout.density));
+
+		ArmyLedgerSnapshot.SiegeEntry siege = getSelectedSiege();
+		if (siege == null) {
+			context.fill(body.x, body.y, body.right(), body.bottom(), CARD_COLOR);
+			context.drawBorder(body.x, body.y, body.width, body.height, CARD_BORDER);
+			drawTrimmed(context, "No siege operation is available.", body.x + 16, body.y + 24, body.width - 32, TEXT_SECONDARY);
+			return;
+		}
+
+		SiegeDetailLayout detailLayout = createSiegeDetailLayout(layout);
+		drawCard(context, detailLayout.titleCard());
+		drawCard(context, detailLayout.overviewCard());
+		drawCard(context, detailLayout.actionsCard());
+
+		drawTrimmed(context, siege.name(), detailLayout.titleCard().x + 12, detailLayout.titleCard().y + 12, detailLayout.titleCard().width - 24, TEXT_PRIMARY);
+		String titleStatus = siege.unlocked()
+			? (siege.replay() ? "Replay operation" : "Progress operation")
+			: "Locked until " + siege.unlockVictories() + " victories";
+		drawScaledText(context, titleStatus, detailLayout.titleCard().x + 12, detailLayout.titleCard().y + 34, siege.unlocked() ? TEXT_WARM : TEXT_MUTED, metaScale(layout.density));
+
+		int rowY = detailLayout.overviewCard().y + 12;
+		drawWrapped(context, siege.description(), detailLayout.overviewCard().x + 12, rowY, detailLayout.overviewCard().width - 24, TEXT_PRIMARY, 2);
+		rowY += 34;
+		rowY = drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Enemies", siege.enemySummary(), detailLayout.overviewCard().width - 24);
+		rowY = drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Weapons", siege.weaponSummary(), detailLayout.overviewCard().width - 24);
+		rowY = drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Threat", siege.threatSummary(), detailLayout.overviewCard().width - 24);
+		rowY = drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Wave", Integer.toString(siege.waveSize()), detailLayout.overviewCard().width - 24);
+		drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Reward", siege.warSuppliesReward() + " war supplies", detailLayout.overviewCard().width - 24);
+
+		int actionY = detailLayout.actionsCard().y + 12;
+		drawScaledText(context, "Campaign", detailLayout.actionsCard().x + 12, actionY, TEXT_SECONDARY, metaScale(layout.density));
+		drawTrimmed(context, snapshot.currentAgeName() + " age - " + snapshot.completedSieges() + " victories", detailLayout.actionsCard().x + 12, actionY + 16, detailLayout.actionsCard().width - 24, TEXT_PRIMARY);
+		drawTrimmed(context, selectedSiegeStatus(siege), detailLayout.actionsCard().x + 12, actionY + 36, detailLayout.actionsCard().width - 24, TEXT_SECONDARY);
+		String rallyText = snapshot.hasRally() ? snapshot.rallyPos().toShortString() : "Not placed";
+		drawTrimmed(context, "Rally: " + rallyText, detailLayout.actionsCard().x + 12, actionY + 56, detailLayout.actionsCard().width - 24, snapshot.hasRally() ? TEXT_WARM : TEXT_MUTED);
+	}
+
+	private Rect siegeCardRect(Rect body, int index) {
+		int gap = 10;
+		int cardHeight = Math.max(68, (body.height - (gap * (snapshot.sieges().size() - 1))) / Math.max(1, snapshot.sieges().size()));
+		int y = body.y + (index * (cardHeight + gap));
+		return new Rect(body.x, y, body.width, cardHeight);
 	}
 
 	private void drawCard(DrawContext context, Rect rect) {
@@ -580,6 +723,16 @@ public class ArmyLedgerScreen extends Screen {
 			.orElse(-1);
 	}
 
+	private int findSiegeHit(double mouseX, double mouseY) {
+		Layout layout = createLayout();
+		for (int i = 0; i < snapshot.sieges().size(); i++) {
+			if (contains(siegeCardRect(layout.mapBody, i), mouseX, mouseY)) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
 	private boolean isPointNear(double mouseX, double mouseY, int centerX, int centerY, int radius) {
 		return distanceSquared(mouseX, mouseY, centerX, centerY) <= radius * radius;
 	}
@@ -591,10 +744,44 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private void syncWidgetLayout() {
-		if (nameField == null) {
+		if (nameField == null || defendersTabButton == null) {
 			return;
 		}
 		Layout layout = createLayout();
+		defendersTabButton.setX(layout.topBar.right() - 188);
+		defendersTabButton.setY(layout.topBar.y + 10);
+		siegesTabButton.setX(layout.topBar.right() - 94);
+		siegesTabButton.setY(layout.topBar.y + 10);
+		defendersTabButton.visible = true;
+		siegesTabButton.visible = true;
+		if (ledgerMode == LedgerMode.SIEGES) {
+			nameField.setVisible(false);
+			renameButton.visible = false;
+			cycleRoleButton.visible = false;
+			locateButton.visible = false;
+			SiegeDetailLayout siegeLayout = createSiegeDetailLayout(layout);
+			int leftX = siegeLayout.actionsCard().x + 12;
+			int rightX = siegeLayout.actionsCard().centerX() + 4;
+			int topY = siegeLayout.actionsCard().y + 86;
+			int buttonWidth = (siegeLayout.actionsCard().width - 32) / 2;
+			previousSiegeButton.setX(leftX);
+			previousSiegeButton.setY(topY);
+			previousSiegeButton.setWidth(buttonWidth);
+			nextSiegeButton.setX(rightX);
+			nextSiegeButton.setY(topY);
+			nextSiegeButton.setWidth(buttonWidth);
+			lockSiegeButton.setX(leftX);
+			lockSiegeButton.setY(topY + 24);
+			lockSiegeButton.setWidth(siegeLayout.actionsCard().width - 24);
+			startSiegeButton.setX(leftX);
+			startSiegeButton.setY(topY + 48);
+			startSiegeButton.setWidth(siegeLayout.actionsCard().width - 24);
+			return;
+		}
+		previousSiegeButton.visible = false;
+		nextSiegeButton.visible = false;
+		lockSiegeButton.visible = false;
+		startSiegeButton.visible = false;
 		if (!layout.detailVisible) {
 			nameField.setVisible(false);
 			renameButton.visible = false;
@@ -719,6 +906,34 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private void refreshControls() {
+		if (defendersTabButton != null) {
+			defendersTabButton.active = ledgerMode != LedgerMode.DEFENDERS;
+			siegesTabButton.active = ledgerMode != LedgerMode.SIEGES;
+		}
+		if (ledgerMode == LedgerMode.SIEGES) {
+			nameField.setVisible(false);
+			renameButton.visible = false;
+			cycleRoleButton.visible = false;
+			locateButton.visible = false;
+			previousSiegeButton.visible = true;
+			nextSiegeButton.visible = true;
+			lockSiegeButton.visible = true;
+			startSiegeButton.visible = true;
+			ArmyLedgerSnapshot.SiegeEntry siege = getSelectedSiege();
+			boolean hasSelection = siege != null;
+			boolean locked = snapshot.siegeLocked();
+			previousSiegeButton.active = hasSelection && !locked && snapshot.sieges().size() > 1;
+			nextSiegeButton.active = hasSelection && !locked && snapshot.sieges().size() > 1;
+			lockSiegeButton.active = hasSelection && (locked || canLockSelectedSiege(siege));
+			lockSiegeButton.setMessage(Text.literal(locked ? "Stand Down" : "Lock Siege"));
+			startSiegeButton.active = snapshot.canStartSiege();
+			startSiegeButton.setMessage(Text.literal("Start Siege"));
+			return;
+		}
+		previousSiegeButton.visible = false;
+		nextSiegeButton.visible = false;
+		lockSiegeButton.visible = false;
+		startSiegeButton.visible = false;
 		ArmyLedgerSnapshot.DefenderEntry defender = getSelectedDefender();
 		boolean hasSelection = defender != null;
 		boolean visible = createLayout().detailVisible;
@@ -757,6 +972,23 @@ public class ArmyLedgerScreen extends Screen {
 		lastSelectedDefenderId = snapshot.defenders().get(0).entityUuid();
 	}
 
+	private void selectInitialSiege() {
+		if (snapshot.sieges().isEmpty()) {
+			selectedSiegeIndex = -1;
+			return;
+		}
+		String selectedId = snapshot.selectedSiegeId();
+		if (selectedId != null && !selectedId.isBlank()) {
+			for (int i = 0; i < snapshot.sieges().size(); i++) {
+				if (snapshot.sieges().get(i).id().equals(selectedId)) {
+					selectedSiegeIndex = i;
+					return;
+				}
+			}
+		}
+		selectedSiegeIndex = 0;
+	}
+
 	private void selectDefender(int index) {
 		selectedIndex = MathHelper.clamp(index, 0, snapshot.defenders().size() - 1);
 		lastSelectedDefenderId = snapshot.defenders().get(selectedIndex).entityUuid();
@@ -774,6 +1006,28 @@ public class ArmyLedgerScreen extends Screen {
 		}
 		selectedIndex = MathHelper.clamp(selectedIndex, 0, snapshot.defenders().size() - 1);
 		return snapshot.defenders().get(selectedIndex);
+	}
+
+	private ArmyLedgerSnapshot.SiegeEntry getSelectedSiege() {
+		if (snapshot.sieges().isEmpty() || selectedSiegeIndex < 0) {
+			return null;
+		}
+		selectedSiegeIndex = MathHelper.clamp(selectedSiegeIndex, 0, snapshot.sieges().size() - 1);
+		return snapshot.sieges().get(selectedSiegeIndex);
+	}
+
+	private void selectSiege(int index) {
+		selectedSiegeIndex = MathHelper.clamp(index, 0, snapshot.sieges().size() - 1);
+		refreshControls();
+	}
+
+	private void cycleSiegeSelection(int direction) {
+		if (snapshot.sieges().isEmpty()) {
+			return;
+		}
+		int next = selectedSiegeIndex < 0 ? 0 : selectedSiegeIndex;
+		next = MathHelper.clamp(next + direction, 0, snapshot.sieges().size() - 1);
+		selectSiege(next);
 	}
 
 	private int countOnlineDefenders() {
@@ -1079,12 +1333,105 @@ public class ArmyLedgerScreen extends Screen {
 		ClientPlayNetworking.send(ArmyLedgerService.LOCATE_PACKET, buf);
 	}
 
+	private void sendLockOrCancelSiege() {
+		if (snapshot.siegeLocked()) {
+			ClientPlayNetworking.send(ArmyLedgerService.CANCEL_SIEGE_PACKET, PacketByteBufs.create());
+			return;
+		}
+		ArmyLedgerSnapshot.SiegeEntry siege = getSelectedSiege();
+		if (siege == null) {
+			return;
+		}
+		PacketByteBuf buf = PacketByteBufs.create();
+		buf.writeString(siege.id(), 64);
+		ClientPlayNetworking.send(ArmyLedgerService.LOCK_SIEGE_PACKET, buf);
+	}
+
+	private void sendStartSiege() {
+		ClientPlayNetworking.send(ArmyLedgerService.START_SIEGE_PACKET, PacketByteBufs.create());
+	}
+
+	private void setLedgerMode(LedgerMode ledgerMode) {
+		this.ledgerMode = ledgerMode;
+		lastLedgerMode = ledgerMode;
+		syncWidgetLayout();
+		refreshControls();
+	}
+
+	private LedgerMode defaultLedgerMode() {
+		if (snapshot.siegeLocked() || !isPeacePhase()) {
+			return LedgerMode.SIEGES;
+		}
+		return lastLedgerMode;
+	}
+
+	private boolean canLockSelectedSiege(ArmyLedgerSnapshot.SiegeEntry siege) {
+		return siege != null
+			&& !snapshot.siegeLocked()
+			&& isPeacePhase()
+			&& snapshot.hasBase()
+			&& snapshot.hasRally()
+			&& siege.unlocked();
+	}
+
+	private String selectedSiegeStatus(ArmyLedgerSnapshot.SiegeEntry siege) {
+		if (siege == null) {
+			return snapshot.siegeStatus();
+		}
+		if (!snapshot.hasBase()) {
+			return "Place a Settlement Standard to unlock campaign planning.";
+		}
+		if (!snapshot.hasRally()) {
+			return "Place a Raid Rally Banner to define the attacker formation point.";
+		}
+		if (snapshot.siegeLocked()) {
+			return "Formation locked. The wave is staged at the rally point and waiting for Start Siege.";
+		}
+		if (!isPeacePhase()) {
+			return "A siege is already active. Finish it before planning another.";
+		}
+		if (!siege.unlocked()) {
+			return "That siege unlocks after " + siege.unlockVictories() + " total victories.";
+		}
+		if (siege.replay()) {
+			return "Replay selected. Rewards still drop, but settlement age progress will not advance.";
+		}
+		return snapshot.siegeStatus();
+	}
+
+	private boolean isPeacePhase() {
+		return "at peace".equalsIgnoreCase(snapshot.siegePhase());
+	}
+
+	private SiegeDetailLayout createSiegeDetailLayout(Layout layout) {
+		Rect body = layout.detailBody;
+		int gap = layout.density == LayoutDensity.COMPACT ? 8 : 10;
+		int titleHeight = 52;
+		int actionsHeight = 122;
+		int overviewHeight = Math.max(128, body.height - titleHeight - actionsHeight - (gap * 2));
+		Rect titleCard = new Rect(body.x, body.y, body.width, titleHeight);
+		Rect overviewCard = new Rect(body.x, titleCard.bottom() + gap, body.width, overviewHeight);
+		Rect actionsCard = new Rect(body.x, overviewCard.bottom() + gap, body.width, Math.max(actionsHeight, body.bottom() - overviewCard.bottom() - gap));
+		return new SiegeDetailLayout(titleCard, overviewCard, actionsCard);
+	}
+
 	private void drawTrimmed(DrawContext context, String text, int x, int y, int maxWidth, int color) {
 		String safe = safeText(text, "");
 		float scale = bodyScale(layoutDensity());
 		int trimWidth = Math.max(1, (int) (maxWidth / scale));
 		OrderedText trimmed = Language.getInstance().reorder(this.textRenderer.trimToWidth(Text.literal(safe), trimWidth));
 		drawScaledOrderedText(context, trimmed, x, y, color, scale);
+	}
+
+	private void drawWrapped(DrawContext context, String text, int x, int y, int maxWidth, int color, int maxLines) {
+		float scale = bodyScale(layoutDensity());
+		int trimWidth = Math.max(1, (int) (maxWidth / scale));
+		List<OrderedText> lines = this.textRenderer.wrapLines(Text.literal(safeText(text, "")), trimWidth);
+		int lineY = y;
+		for (int i = 0; i < Math.min(maxLines, lines.size()); i++) {
+			drawScaledOrderedText(context, lines.get(i), x, lineY, color, scale);
+			lineY += Math.round(10 * scale) + 2;
+		}
 	}
 
 	private void drawScaledText(DrawContext context, String text, int x, int y, int color, float scale) {
@@ -1240,6 +1587,9 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private record DetailLayout(Rect titleCard, Rect portraitCard, Rect statsCard, Rect actionsCard) {
+	}
+
+	private record SiegeDetailLayout(Rect titleCard, Rect overviewCard, Rect actionsCard) {
 	}
 
 	private record BaseBounds(int minX, int maxX, int minZ, int maxZ) {

@@ -35,7 +35,7 @@ public final class SiegeUnitController {
 	private final RamController ramController = new RamController();
 
 	public void dispatch(ServerWorld world, SiegeBaseState state, SiegeSession session) {
-		if (session.getPhase() == SiegePhase.COUNTDOWN) {
+		if (session.getPhase() == SiegePhase.STAGED || session.getPhase() == SiegePhase.COUNTDOWN) {
 			holdAtRally(world, session);
 			return;
 		}

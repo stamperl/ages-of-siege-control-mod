@@ -127,7 +127,7 @@ public final class ModCommands {
 			return 0;
 		}
 
-		player.sendMessage(Text.literal("Siege countdown started. Hold the line when the attackers arrive.")
+		player.sendMessage(Text.literal("Siege started from the selected operation. Hold the line.")
 			.formatted(Formatting.GOLD), false);
 		return 1;
 	}

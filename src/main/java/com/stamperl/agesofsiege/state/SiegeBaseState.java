@@ -46,6 +46,7 @@ public class SiegeBaseState extends PersistentState {
 	private boolean siegeFailed;
 	private BlockPos rallyPoint;
 	private BlockPos assaultOrigin;
+	private String selectedSiegeId = "homestead_raid";
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
 	private final Map<Long, Integer> wallHealth = new HashMap<>();
 	private final List<PlacedDefender> placedDefenders = new ArrayList<>();
@@ -88,6 +89,7 @@ public class SiegeBaseState extends PersistentState {
 				nbt.getInt("assaultOriginZ")
 			);
 		}
+		state.selectedSiegeId = nbt.contains("selectedSiegeId") ? nbt.getString("selectedSiegeId") : "homestead_raid";
 		state.objectiveHealth = nbt.contains("objectiveHealth") ? nbt.getInt("objectiveHealth") : MAX_OBJECTIVE_HEALTH;
 		NbtList wallList = nbt.getList("wallHealth", NbtElement.COMPOUND_TYPE);
 		for (NbtElement element : wallList) {
@@ -545,6 +547,35 @@ public class SiegeBaseState extends PersistentState {
 		markDirty();
 	}
 
+	public void prepareStagedSiege(MinecraftServer server, String siegeId, int siegeAgeLevel) {
+		this.siegeFailed = false;
+		this.selectedSiegeId = siegeId == null || siegeId.isBlank() ? "homestead_raid" : siegeId;
+		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
+		this.wallHealth.clear();
+		resetCompatRuntime();
+		long now = server.getOverworld().getTime();
+		this.activeSession = new SiegeSession(
+			SiegePhase.STAGED,
+			siegeAgeLevel,
+			completedSieges,
+			basePos,
+			rallyPoint,
+			assaultOrigin,
+			now,
+			now,
+			0L,
+			List.of(),
+			List.of(),
+			Map.of(),
+			null,
+			null,
+			0L,
+			0L,
+			null
+		);
+		markDirty();
+	}
+
 	public int tickCountdown() {
 		if (!isSiegePending() || activeSession == null) {
 			return 0;
@@ -584,7 +615,7 @@ public class SiegeBaseState extends PersistentState {
 	public void stageSiegeWave(List<UUID> attackerIds, List<UUID> ramIds, Map<UUID, UnitRole> roleAssignments, int waveSize, BlockPos assaultOrigin) {
 		this.assaultOrigin = assaultOrigin == null ? null : assaultOrigin.toImmutable();
 		updateSession(session -> new SiegeSession(
-			SiegePhase.COUNTDOWN,
+			session.getPhase(),
 			session.getSessionAgeLevel(),
 			session.getSessionVictoryCount(),
 			session.getObjectivePos(),
@@ -683,6 +714,19 @@ public class SiegeBaseState extends PersistentState {
 		markDirty();
 	}
 
+	public String getSelectedSiegeId() {
+		return selectedSiegeId;
+	}
+
+	public void setSelectedSiegeId(String selectedSiegeId) {
+		String next = selectedSiegeId == null || selectedSiegeId.isBlank() ? "homestead_raid" : selectedSiegeId;
+		if (next.equals(this.selectedSiegeId)) {
+			return;
+		}
+		this.selectedSiegeId = next;
+		markDirty();
+	}
+
 	public void damageObjective(ServerWorld world, int amount) {
 		OBJECTIVE_SERVICE.damageObjective(world, this, activeSession, amount);
 	}
@@ -756,6 +800,7 @@ public class SiegeBaseState extends PersistentState {
 			nbt.putInt("assaultOriginY", assaultOrigin.getY());
 			nbt.putInt("assaultOriginZ", assaultOrigin.getZ());
 		}
+		nbt.putString("selectedSiegeId", selectedSiegeId == null ? "homestead_raid" : selectedSiegeId);
 		nbt.putInt("objectiveHealth", objectiveHealth);
 		if (activeSession != null) {
 			nbt.put("activeSession", activeSession.toNbt());
