@@ -94,13 +94,15 @@ public final class DefenderRuntimeService {
 		double homeZ = homePost.getZ() + 0.5D;
 		double distanceSq = mob.squaredDistanceTo(homeX, homeY, homeZ);
 		if (!siegeActive) {
+			applyPeaceGuardState(mob);
 			restoreIdlePostState(mob, defender, homeX, homeY, homeZ, distanceSq);
 			return;
 		}
+		applySiegeGuardState(mob);
 		double maxDistance = ARCHER_POST_RADIUS;
 		mob.setAiDisabled(false);
 		if (distanceSq <= maxDistance * maxDistance) {
-			lockDefenderToPost(mob);
+			lockDefenderToPost(mob, defender.homeYaw());
 			return;
 		}
 
@@ -111,7 +113,7 @@ public final class DefenderRuntimeService {
 
 		if (distanceSq > (maxDistance + 8.0D) * (maxDistance + 8.0D)) {
 			mob.teleport(homeX, homeY, homeZ);
-			lockDefenderToPost(mob);
+			lockDefenderToPost(mob, defender.homeYaw());
 			return;
 		}
 
@@ -136,7 +138,7 @@ public final class DefenderRuntimeService {
 		if (!defender.role().isRanged()) {
 			if (distanceSq <= allowedDistance * allowedDistance) {
 				mob.setAiDisabled(true);
-				lockDefenderToPost(mob);
+				lockDefenderToPost(mob, defender.homeYaw());
 				return;
 			}
 			mob.setAiDisabled(false);
@@ -147,12 +149,26 @@ public final class DefenderRuntimeService {
 		if (distanceSq > allowedDistance * allowedDistance) {
 			mob.teleport(homeX, homeY, homeZ);
 		}
-		lockDefenderToPost(mob);
+		lockDefenderToPost(mob, defender.homeYaw());
 	}
 
-	private static void lockDefenderToPost(MobEntity mob) {
+	private static void applyPeaceGuardState(MobEntity mob) {
+		mob.setInvulnerable(true);
+		mob.extinguish();
+	}
+
+	private static void applySiegeGuardState(MobEntity mob) {
+		if (mob.isInvulnerable()) {
+			mob.setInvulnerable(false);
+		}
+	}
+
+	private static void lockDefenderToPost(MobEntity mob, float yaw) {
 		mob.getNavigation().stop();
 		mob.setVelocity(0.0D, mob.getVelocity().y, 0.0D);
+		mob.setYaw(yaw);
+		mob.setBodyYaw(yaw);
+		mob.setHeadYaw(yaw);
 	}
 
 	private static void updateSoldierTarget(
@@ -197,16 +213,18 @@ public final class DefenderRuntimeService {
 		double homeZ = homePost.getZ() + 0.5D;
 		double distanceSq = mob.squaredDistanceTo(homeX, homeY, homeZ);
 		if (!siegeActive) {
+			applyPeaceGuardState(mob);
 			restoreIdlePostState(mob, defender, homeX, homeY, homeZ, distanceSq);
 			return;
 		}
+		applySiegeGuardState(mob);
 
 		updateSoldierTarget(world, mob, defender, validSiegeTargets, breacherTargets);
 		LivingEntity target = mob.getTarget();
 		if (target == null) {
 			if (distanceSq <= SOLDIER_POST_RADIUS * SOLDIER_POST_RADIUS) {
 				mob.setAiDisabled(true);
-				lockDefenderToPost(mob);
+				lockDefenderToPost(mob, defender.homeYaw());
 				return;
 			}
 			mob.setAiDisabled(false);

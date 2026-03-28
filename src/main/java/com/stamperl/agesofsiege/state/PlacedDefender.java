@@ -11,6 +11,7 @@ public record PlacedDefender(
 	String dimensionId,
 	DefenderRole role,
 	BlockPos homePost,
+	float homeYaw,
 	double leashRadius,
 	BlockPos settlementBannerPos,
 	String settlementDimensionId,
@@ -26,6 +27,7 @@ public record PlacedDefender(
 		nbt.putInt("homeX", homePost.getX());
 		nbt.putInt("homeY", homePost.getY());
 		nbt.putInt("homeZ", homePost.getZ());
+		nbt.putFloat("homeYaw", homeYaw);
 		nbt.putDouble("leashRadius", leashRadius);
 		if (settlementBannerPos != null) {
 			nbt.putInt("bannerX", settlementBannerPos.getX());
@@ -56,6 +58,7 @@ public record PlacedDefender(
 			nbt.getString("dimensionId"),
 			DefenderRole.valueOf(nbt.getString("role")),
 			new BlockPos(nbt.getInt("homeX"), nbt.getInt("homeY"), nbt.getInt("homeZ")),
+			nbt.contains("homeYaw") ? nbt.getFloat("homeYaw") : 0.0F,
 			nbt.getDouble("leashRadius"),
 			bannerPos,
 			nbt.contains("settlementDimensionId") ? nbt.getString("settlementDimensionId") : null,

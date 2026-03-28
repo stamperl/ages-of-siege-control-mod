@@ -145,6 +145,7 @@ public final class DefenderSpawnerService {
 			player.getWorld().getRegistryKey().getValue().toString(),
 			role,
 			targetPos.toImmutable(),
+			player.getYaw(),
 			role.leashRadius(),
 			state.getBasePos(),
 			state.getDimensionId(),

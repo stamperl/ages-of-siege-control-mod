@@ -95,6 +95,7 @@ public class ArmyLedgerScreen extends Screen {
 	private double mapDragLastX;
 	private double mapDragLastY;
 	private boolean detailDrawerOpen = true;
+	private int detailScroll;
 
 	private enum LayoutDensity {
 		COMPACT,
@@ -145,7 +146,6 @@ public class ArmyLedgerScreen extends Screen {
 		drawFrame(context, layout.frame);
 		drawTopBar(context, layout);
 		drawMapPanel(context, layout, mouseX, mouseY);
-		drawLegend(context, layout.mapLegend);
 		if (layout.detailVisible) {
 			drawDetailPanel(context, layout, mouseX, mouseY);
 		}
@@ -202,6 +202,14 @@ public class ArmyLedgerScreen extends Screen {
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double verticalAmount) {
 		Layout layout = createLayout();
+		if (layout.detailVisible && layout.mode == LayoutMode.DRAWER && contains(layout.detailBody, mouseX, mouseY)) {
+			int maxScroll = getDetailScrollMax(layout);
+			if (maxScroll > 0) {
+				detailScroll = MathHelper.clamp(detailScroll - (int) Math.round(verticalAmount * 20.0D), 0, maxScroll);
+				syncWidgetLayout();
+				return true;
+			}
+		}
 		Rect body = layout.mapBody;
 		if (!contains(body, mouseX, mouseY) || verticalAmount == 0.0D) {
 			return super.mouseScrolled(mouseX, mouseY, verticalAmount);
@@ -247,6 +255,11 @@ public class ArmyLedgerScreen extends Screen {
 		context.fill(bar.x, bar.y, bar.right(), bar.bottom(), PANEL_COLOR);
 		context.drawBorder(bar.x, bar.y, bar.width, bar.height, PANEL_BORDER);
 
+		if (layout.density == LayoutDensity.COMPACT) {
+			drawCompactTopBar(context, layout, bar);
+			return;
+		}
+
 		int inset = layout.density == LayoutDensity.COMPACT ? 10 : 12;
 		int gap = layout.density == LayoutDensity.COMPACT ? 8 : 10;
 		int maxInnerWidth = layout.mode == LayoutMode.STACKED ? 1080 : bar.width - (inset * 2);
@@ -264,6 +277,31 @@ public class ArmyLedgerScreen extends Screen {
 		Rect phaseCard = new Rect(innerX, settlementCard.bottom() + gap, chipWidth, rowHeight);
 		Rect guardsCard = new Rect(phaseCard.right() + gap, phaseCard.y, chipWidth, rowHeight);
 		Rect onPostCard = new Rect(guardsCard.right() + gap, phaseCard.y, innerWidth - chipWidth - chipWidth - gap - gap, rowHeight);
+
+		drawInfoCard(context, settlementCard, "Settlement", safeText(snapshot.ownerName(), "Unclaimed"));
+		drawCommandCard(context, commandCard, layout);
+		drawInfoCard(context, phaseCard, "Phase", formatPhase(snapshot.siegePhase()));
+		drawInfoCard(context, guardsCard, "Guards", Integer.toString(snapshot.defenders().size()));
+		drawInfoCard(context, onPostCard, "On Post", Integer.toString(countOnlineDefenders()));
+	}
+
+	private void drawCompactTopBar(DrawContext context, Layout layout, Rect bar) {
+		int inset = 10;
+		int gap = 8;
+		int innerX = bar.x + inset;
+		int innerY = bar.y + inset;
+		int innerWidth = bar.width - (inset * 2);
+		int cardHeight = bar.height - (inset * 2);
+
+		int settlementWidth = Math.max(180, Math.round(innerWidth * 0.24F));
+		int commandWidth = Math.max(260, Math.round(innerWidth * 0.30F));
+		int metricWidth = (innerWidth - settlementWidth - commandWidth - (gap * 4)) / 3;
+
+		Rect settlementCard = new Rect(innerX, innerY, settlementWidth, cardHeight);
+		Rect commandCard = new Rect(settlementCard.right() + gap, innerY, commandWidth, cardHeight);
+		Rect phaseCard = new Rect(commandCard.right() + gap, innerY, metricWidth, cardHeight);
+		Rect guardsCard = new Rect(phaseCard.right() + gap, innerY, metricWidth, cardHeight);
+		Rect onPostCard = new Rect(guardsCard.right() + gap, innerY, innerWidth - settlementWidth - commandWidth - metricWidth - metricWidth - (gap * 4), cardHeight);
 
 		drawInfoCard(context, settlementCard, "Settlement", safeText(snapshot.ownerName(), "Unclaimed"));
 		drawCommandCard(context, commandCard, layout);
@@ -391,8 +429,16 @@ public class ArmyLedgerScreen extends Screen {
 				int ring = marker.radius + 4;
 				context.drawBorder(marker.centerX - ring, marker.centerY - ring, ring * 2, ring * 2, TEXT_PRIMARY);
 			}
-			context.fill(marker.centerX - marker.radius, marker.centerY - marker.radius, marker.centerX + marker.radius, marker.centerY + marker.radius, markerColor);
-			context.drawBorder(marker.centerX - marker.radius, marker.centerY - marker.radius, marker.radius * 2, marker.radius * 2, 0x70000000);
+			int boxLeft = marker.centerX - marker.radius - 1;
+			int boxTop = marker.centerY - marker.radius - 1;
+			int boxSize = marker.radius * 2 + 2;
+			context.fill(boxLeft, boxTop, boxLeft + boxSize, boxTop + boxSize, 0xD0141A20);
+			context.drawBorder(boxLeft, boxTop, boxSize, boxSize, markerColor);
+			if (defender.role() == DefenderRole.ARCHER) {
+				drawBowMarker(context, marker.centerX, marker.centerY, markerColor);
+			} else {
+				drawSwordMarker(context, marker.centerX, marker.centerY, markerColor);
+			}
 
 			if (isPointNear(mouseX, mouseY, marker.centerX, marker.centerY, marker.radius + 6) || marker.defenderIndex == selectedIndex) {
 				int labelX = Math.min(body.right() - 110, marker.centerX + 10);
@@ -424,11 +470,16 @@ public class ArmyLedgerScreen extends Screen {
 			return;
 		}
 
+		int scrollOffset = layout.mode == LayoutMode.DRAWER ? getClampedDetailScroll(layout) : 0;
 		DetailLayout detailLayout = createDetailLayout(layout);
-		Rect titleCard = detailLayout.titleCard;
-		Rect portraitCard = detailLayout.portraitCard;
-		Rect statsCard = detailLayout.statsCard;
-		Rect actionsCard = detailLayout.actionsCard;
+		Rect titleCard = offsetRect(detailLayout.titleCard, -scrollOffset);
+		Rect portraitCard = offsetRect(detailLayout.portraitCard, -scrollOffset);
+		Rect statsCard = offsetRect(detailLayout.statsCard, -scrollOffset);
+		Rect actionsCard = offsetRect(detailLayout.actionsCard, -scrollOffset);
+
+		if (layout.mode == LayoutMode.DRAWER) {
+			context.enableScissor(body.x, body.y, body.right(), body.bottom());
+		}
 
 		drawCard(context, titleCard);
 		drawCard(context, portraitCard);
@@ -449,6 +500,11 @@ public class ArmyLedgerScreen extends Screen {
 		drawStatsCard(context, layout, statsCard, defender);
 
 		drawScaledText(context, "Rename Guard", actionsCard.x + 12, actionsCard.y + 12, TEXT_SECONDARY, metaScale(layout.density));
+
+		if (layout.mode == LayoutMode.DRAWER) {
+			context.disableScissor();
+			drawDetailScrollbar(context, layout, detailLayout);
+		}
 	}
 
 	private void drawCard(DrawContext context, Rect rect) {
@@ -491,33 +547,6 @@ public class ArmyLedgerScreen extends Screen {
 		drawStatRow(context, statsCard.x + 12, rowY, "Current", defender.currentPos().toShortString(), statsCard.width - 24);
 	}
 
-	private void drawLegend(DrawContext context, Rect legend) {
-		context.fill(legend.x, legend.y, legend.right(), legend.bottom(), PANEL_COLOR);
-		context.drawBorder(legend.x, legend.y, legend.width, legend.height, PANEL_BORDER);
-
-		int x = legend.x + 12;
-		int chipY = legend.y + (layoutDensity() == LayoutDensity.COMPACT ? 7 : 8);
-		boolean shortLabels = legend.width < 620;
-		x = drawLegendChip(context, x, chipY, MARKER_ARCHER, false, shortLabels ? "Arc" : "Archer");
-		x = drawLegendChip(context, x + 8, chipY, MARKER_SOLDIER, false, shortLabels ? "Sol" : "Soldier");
-		x = drawLegendChip(context, x + 8, chipY, MARKER_SELECTED, false, shortLabels ? "Sel" : "Selected");
-		x = drawLegendChip(context, x + 8, chipY, MARKER_BANNER, false, shortLabels ? "Ban" : "Banner");
-		drawLegendChip(context, x + 8, chipY, MARKER_POST, true, "Post");
-	}
-
-	private int drawLegendChip(DrawContext context, int x, int y, int color, boolean diamond, String label) {
-		int width = 52 + this.textRenderer.getWidth(label);
-		context.fill(x, y - 4, x + width, y + 14, CARD_COLOR);
-		context.drawBorder(x, y - 4, width, 18, CARD_BORDER);
-		if (diamond) {
-			drawDiamond(context, x + 10, y - 1, 10, color);
-		} else {
-			context.fill(x + 8, y - 1, x + 18, y + 9, color);
-		}
-		drawScaledText(context, label, x + 24, y, TEXT_SECONDARY, metaScale(layoutDensity()));
-		return x + width;
-	}
-
 	private void drawDiamond(DrawContext context, int x, int y, int size, int color) {
 		int half = size / 2;
 		for (int row = 0; row < size; row++) {
@@ -525,6 +554,20 @@ public class ArmyLedgerScreen extends Screen {
 			int span = half - distance;
 			context.fill(x + half - span, y + row, x + half + span + 1, y + row + 1, color);
 		}
+	}
+
+	private void drawSwordMarker(DrawContext context, int centerX, int centerY, int color) {
+		context.fill(centerX, centerY - 5, centerX + 1, centerY + 3, color);
+		context.fill(centerX - 2, centerY - 2, centerX + 3, centerY - 1, color);
+		context.fill(centerX - 1, centerY + 3, centerX + 2, centerY + 5, color);
+	}
+
+	private void drawBowMarker(DrawContext context, int centerX, int centerY, int color) {
+		context.fill(centerX - 2, centerY - 5, centerX - 1, centerY + 5, color);
+		context.fill(centerX + 2, centerY - 5, centerX + 3, centerY + 5, color);
+		context.fill(centerX - 1, centerY - 4, centerX + 2, centerY - 3, color);
+		context.fill(centerX - 1, centerY + 3, centerX + 2, centerY + 4, color);
+		context.fill(centerX, centerY - 5, centerX + 1, centerY + 5, 0xE0F0F3F6);
 	}
 
 	private int findMarkerHit(double mouseX, double mouseY) {
@@ -559,7 +602,9 @@ public class ArmyLedgerScreen extends Screen {
 			locateButton.visible = false;
 			return;
 		}
-		Rect actions = createDetailLayout(layout).actionsCard;
+		int scrollOffset = layout.mode == LayoutMode.DRAWER ? getClampedDetailScroll(layout) : 0;
+		Rect visibleBody = layout.detailBody;
+		Rect actions = offsetRect(createDetailLayout(layout).actionsCard, -scrollOffset);
 
 		int fieldX = actions.x + 12;
 		int fieldY = actions.y + 28;
@@ -567,23 +612,36 @@ public class ArmyLedgerScreen extends Screen {
 		nameField.setX(fieldX);
 		nameField.setY(fieldY);
 		nameField.setWidth(fieldWidth);
+		nameField.setVisible(fieldY >= visibleBody.y && fieldY + 20 <= visibleBody.bottom());
 
 		int buttonY = fieldY + 30;
-		int gap = 8;
 		renameButton.setX(fieldX);
 		renameButton.setY(buttonY);
 		renameButton.setWidth(fieldWidth);
+		renameButton.visible = buttonY >= visibleBody.y && buttonY + 20 <= visibleBody.bottom();
 		cycleRoleButton.setX(fieldX);
 		cycleRoleButton.setY(buttonY + 24);
 		cycleRoleButton.setWidth(fieldWidth);
+		cycleRoleButton.visible = buttonY + 24 >= visibleBody.y && buttonY + 44 <= visibleBody.bottom();
 		locateButton.setX(fieldX);
 		locateButton.setY(buttonY + 48);
 		locateButton.setWidth(fieldWidth);
+		locateButton.visible = buttonY + 48 >= visibleBody.y && buttonY + 68 <= visibleBody.bottom();
 	}
 
 	private DetailLayout createDetailLayout(Layout layout) {
 		Rect body = layout.detailBody;
 		int gap = layout.density == LayoutDensity.COMPACT ? 8 : 10;
+		if (layout.mode == LayoutMode.DRAWER) {
+			int titleHeight = 46;
+			int portraitHeight = 120;
+			int statsHeight = 88;
+			Rect titleCard = new Rect(body.x, body.y, body.width, titleHeight);
+			Rect portraitCard = new Rect(body.x, titleCard.bottom() + gap, body.width, portraitHeight);
+			Rect statsCard = new Rect(body.x, portraitCard.bottom() + gap, body.width, statsHeight);
+			Rect actionsCard = new Rect(body.x, statsCard.bottom() + gap, body.width, Math.max(112, body.bottom() - (statsCard.bottom() + gap)));
+			return new DetailLayout(titleCard, portraitCard, statsCard, actionsCard);
+		}
 		if (layout.mode == LayoutMode.STACKED) {
 			int portraitWidth = MathHelper.clamp(body.width / 4, 150, 230);
 			int rightWidth = Math.max(240, body.width - portraitWidth - gap);
@@ -596,12 +654,12 @@ public class ArmyLedgerScreen extends Screen {
 			Rect actionsCard = new Rect(titleCard.x, statsCard.bottom() + gap, rightWidth, Math.max(68, body.bottom() - statsCard.bottom() - gap));
 			return new DetailLayout(titleCard, portraitCard, statsCard, actionsCard);
 		}
-		int titleHeight = layout.mode == LayoutMode.DRAWER ? 52 : (layout.density == LayoutDensity.WIDE ? 66 : 58);
+		int titleHeight = layout.density == LayoutDensity.WIDE ? 66 : 58;
 		int actionsHeight = computeActionsHeight(layout, body.width);
 		int portraitHeight = MathHelper.clamp((body.height - titleHeight - actionsHeight - (gap * 3)) / 2, 96, layout.density == LayoutDensity.WIDE ? 176 : 140);
 		Rect titleCard = new Rect(body.x, body.y, body.width, titleHeight);
 		Rect portraitCard = new Rect(body.x, titleCard.bottom() + gap, body.width, portraitHeight);
-		int statsHeight = Math.max(layout.mode == LayoutMode.DRAWER ? 96 : 110, body.bottom() - portraitCard.bottom() - gap - actionsHeight - gap);
+		int statsHeight = Math.max(110, body.bottom() - portraitCard.bottom() - gap - actionsHeight - gap);
 		Rect statsCard = new Rect(body.x, portraitCard.bottom() + gap, body.width, statsHeight);
 		Rect actionsCard = new Rect(body.x, statsCard.bottom() + gap, body.width, Math.max(84, body.bottom() - (statsCard.bottom() + gap)));
 		return new DetailLayout(titleCard, portraitCard, statsCard, actionsCard);
@@ -619,7 +677,7 @@ public class ArmyLedgerScreen extends Screen {
 		int frameY = (this.height - frameHeight) / 2;
 		Rect frame = new Rect(frameX, frameY, frameWidth, frameHeight);
 		int outerInset = density == LayoutDensity.COMPACT ? 10 : 12;
-		int topBarHeight = density == LayoutDensity.WIDE ? 120 : (density == LayoutDensity.COMPACT ? 84 : 104);
+		int topBarHeight = density == LayoutDensity.WIDE ? 120 : (density == LayoutDensity.COMPACT ? 62 : 104);
 		Rect topBar = new Rect(frame.x + outerInset, frame.y + outerInset, frame.width - (outerInset * 2), topBarHeight);
 		int mainY = topBar.bottom() + PANEL_GAP;
 		int mainHeight = frame.bottom() - outerInset - mainY;
@@ -652,14 +710,12 @@ public class ArmyLedgerScreen extends Screen {
 			mapPanel = new Rect(frame.x + outerInset, mainY, mapWidth, mainHeight);
 			detailPanel = new Rect(mapPanel.right() + PANEL_GAP, mainY, detailWidth, mainHeight);
 		}
-		int mapLegendHeight = density == LayoutDensity.COMPACT ? 26 : 32;
 		int visibleMapWidth = mode == LayoutMode.DRAWER && detailVisible
 			? Math.max(300, detailPanel.x - mapPanel.x - 28)
 			: mapPanel.width - 28;
-		Rect mapLegend = new Rect(mapPanel.x + 14, mapPanel.bottom() - mapLegendHeight - 10, visibleMapWidth, mapLegendHeight);
-		Rect mapBody = new Rect(mapPanel.x + 14, mapPanel.y + PANEL_HEADER_HEIGHT + 10, visibleMapWidth, mapPanel.height - PANEL_HEADER_HEIGHT - mapLegendHeight - 24);
+		Rect mapBody = new Rect(mapPanel.x + 14, mapPanel.y + PANEL_HEADER_HEIGHT + 10, visibleMapWidth, mapPanel.height - PANEL_HEADER_HEIGHT - 18);
 		Rect detailBody = new Rect(detailPanel.x + 12, detailPanel.y + PANEL_HEADER_HEIGHT + 10, detailPanel.width - 24, detailPanel.height - PANEL_HEADER_HEIGHT - 22);
-		return new Layout(frame, topBar, mapPanel, detailPanel, mapLegend, mapBody, detailBody, density, mode, detailVisible);
+		return new Layout(frame, topBar, mapPanel, detailPanel, mapBody, detailBody, density, mode, detailVisible);
 	}
 
 	private void refreshControls() {
@@ -706,6 +762,7 @@ public class ArmyLedgerScreen extends Screen {
 		lastSelectedDefenderId = snapshot.defenders().get(selectedIndex).entityUuid();
 		if (createLayout().mode == LayoutMode.DRAWER) {
 			detailDrawerOpen = true;
+			detailScroll = 0;
 		}
 		refreshNameField();
 		refreshControls();
@@ -955,6 +1012,40 @@ public class ArmyLedgerScreen extends Screen {
 		return mouseX >= rect.x && mouseX <= rect.right() && mouseY >= rect.y && mouseY <= rect.bottom();
 	}
 
+	private Rect offsetRect(Rect rect, int offsetY) {
+		return new Rect(rect.x, rect.y + offsetY, rect.width, rect.height);
+	}
+
+	private int getClampedDetailScroll(Layout layout) {
+		int maxScroll = getDetailScrollMax(layout);
+		detailScroll = MathHelper.clamp(detailScroll, 0, maxScroll);
+		return detailScroll;
+	}
+
+	private int getDetailScrollMax(Layout layout) {
+		if (layout.mode != LayoutMode.DRAWER || !layout.detailVisible) {
+			return 0;
+		}
+		DetailLayout detailLayout = createDetailLayout(layout);
+		int contentHeight = detailLayout.actionsCard.bottom() - layout.detailBody.y;
+		return Math.max(0, contentHeight - layout.detailBody.height);
+	}
+
+	private void drawDetailScrollbar(DrawContext context, Layout layout, DetailLayout detailLayout) {
+		int maxScroll = getDetailScrollMax(layout);
+		if (maxScroll <= 0) {
+			return;
+		}
+		Rect body = layout.detailBody;
+		int trackX = body.right() - 4;
+		context.fill(trackX, body.y, trackX + 2, body.bottom(), CARD_BORDER);
+		int contentHeight = detailLayout.actionsCard.bottom() - body.y;
+		int thumbHeight = Math.max(24, Math.round(body.height * (body.height / (float) Math.max(body.height, contentHeight))));
+		int travel = Math.max(1, body.height - thumbHeight);
+		int thumbY = body.y + Math.round((getClampedDetailScroll(layout) / (float) maxScroll) * travel);
+		context.fill(trackX - 1, thumbY, trackX + 3, thumbY + thumbHeight, TEXT_SECONDARY);
+	}
+
 	private void sendRename() {
 		ArmyLedgerSnapshot.DefenderEntry defender = getSelectedDefender();
 		if (defender == null) {
@@ -1145,7 +1236,7 @@ public class ArmyLedgerScreen extends Screen {
 		}
 	}
 
-	private record Layout(Rect frame, Rect topBar, Rect mapPanel, Rect detailPanel, Rect mapLegend, Rect mapBody, Rect detailBody, LayoutDensity density, LayoutMode mode, boolean detailVisible) {
+	private record Layout(Rect frame, Rect topBar, Rect mapPanel, Rect detailPanel, Rect mapBody, Rect detailBody, LayoutDensity density, LayoutMode mode, boolean detailVisible) {
 	}
 
 	private record DetailLayout(Rect titleCard, Rect portraitCard, Rect statsCard, Rect actionsCard) {
