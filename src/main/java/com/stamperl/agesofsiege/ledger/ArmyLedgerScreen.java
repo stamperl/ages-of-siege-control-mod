@@ -187,6 +187,10 @@ public class ArmyLedgerScreen extends Screen {
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		if (ledgerMode == LedgerMode.SIEGES) {
+			Layout layout = createLayout();
+			if (!contains(layout.mapBody, mouseX, mouseY)) {
+				return super.mouseClicked(mouseX, mouseY, button);
+			}
 			int siegeIndex = findSiegeHit(mouseX, mouseY);
 			if (siegeIndex >= 0) {
 				selectSiege(siegeIndex);
@@ -889,7 +893,7 @@ public class ArmyLedgerScreen extends Screen {
 			Rect actions = offsetRect(siegeLayout.actionsCard(), -scrollOffset);
 			int leftX = actions.x + 12;
 			int rightX = actions.centerX() + 4;
-			int topY = actions.y + 98;
+			int topY = MathHelper.clamp(actions.y + 82, visibleBody.y + 8, visibleBody.bottom() - 68);
 			int buttonWidth = (siegeLayout.actionsCard().width - 32) / 2;
 			previousSiegeButton.setX(leftX);
 			previousSiegeButton.setY(topY);
@@ -903,10 +907,10 @@ public class ArmyLedgerScreen extends Screen {
 			startSiegeButton.setX(leftX);
 			startSiegeButton.setY(topY + 48);
 			startSiegeButton.setWidth(siegeLayout.actionsCard().width - 24);
-			previousSiegeButton.visible = topY >= visibleBody.y && topY + 20 <= visibleBody.bottom();
-			nextSiegeButton.visible = previousSiegeButton.visible;
-			lockSiegeButton.visible = topY + 24 >= visibleBody.y && topY + 44 <= visibleBody.bottom();
-			startSiegeButton.visible = topY + 48 >= visibleBody.y && topY + 68 <= visibleBody.bottom();
+			previousSiegeButton.visible = layout.detailVisible;
+			nextSiegeButton.visible = layout.detailVisible;
+			lockSiegeButton.visible = layout.detailVisible;
+			startSiegeButton.visible = layout.detailVisible;
 			return;
 		}
 		previousSiegeButton.visible = false;
@@ -1008,9 +1012,19 @@ public class ArmyLedgerScreen extends Screen {
 		Rect detailPanel;
 		if (mode == LayoutMode.STACKED) {
 			int splitGap = density == LayoutDensity.COMPACT ? 10 : 12;
-			int detailMinHeight = density == LayoutDensity.COMPACT ? 170 : 220;
-			int mapHeight = Math.max(220, Math.min((int) Math.round(mainHeight * 0.58F), mainHeight - detailMinHeight - splitGap));
+			int detailMinHeight = ledgerMode == LedgerMode.SIEGES
+				? (density == LayoutDensity.COMPACT ? 150 : 190)
+				: (density == LayoutDensity.COMPACT ? 170 : 220);
+			int mapMinHeight = ledgerMode == LedgerMode.SIEGES
+				? (density == LayoutDensity.COMPACT ? 150 : 190)
+				: 220;
+			int maxMapHeight = Math.max(mapMinHeight, mainHeight - detailMinHeight - splitGap);
+			int mapHeight = MathHelper.clamp((int) Math.round(mainHeight * 0.58F), mapMinHeight, maxMapHeight);
 			int detailHeight = Math.max(detailMinHeight, mainHeight - mapHeight - splitGap);
+			if (mapHeight + detailHeight + splitGap > mainHeight) {
+				mapHeight = Math.max(120, mainHeight - detailMinHeight - splitGap);
+				detailHeight = Math.max(120, mainHeight - mapHeight - splitGap);
+			}
 			int contentWidth = Math.min(frame.width - (outerInset * 2), STACKED_CONTENT_MAX_WIDTH);
 			int contentX = frame.x + ((frame.width - contentWidth) / 2);
 			mapPanel = new Rect(contentX, mainY, contentWidth, mapHeight);
