@@ -104,6 +104,8 @@ public class ArmyLedgerScreen extends Screen {
 	private double mapDragLastY;
 	private boolean detailDrawerOpen = true;
 	private int detailScroll;
+	private int siegeListScroll;
+	private int siegeDetailScroll;
 	private LedgerMode ledgerMode = LedgerMode.DEFENDERS;
 
 	private enum LayoutDensity {
@@ -241,10 +243,26 @@ public class ArmyLedgerScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double verticalAmount) {
+		Layout layout = createLayout();
 		if (ledgerMode == LedgerMode.SIEGES) {
+			if (contains(layout.mapBody, mouseX, mouseY)) {
+				int maxScroll = getSiegeListScrollMax(layout);
+				if (maxScroll > 0) {
+					siegeListScroll = MathHelper.clamp(siegeListScroll - (int) Math.round(verticalAmount * 20.0D), 0, maxScroll);
+					refreshControls();
+					return true;
+				}
+			}
+			if (layout.detailVisible && contains(layout.detailBody, mouseX, mouseY)) {
+				int maxScroll = getSiegeDetailScrollMax(layout);
+				if (maxScroll > 0) {
+					siegeDetailScroll = MathHelper.clamp(siegeDetailScroll - (int) Math.round(verticalAmount * 20.0D), 0, maxScroll);
+					syncWidgetLayout();
+					return true;
+				}
+			}
 			return super.mouseScrolled(mouseX, mouseY, verticalAmount);
 		}
-		Layout layout = createLayout();
 		if (layout.detailVisible && layout.mode == LayoutMode.DRAWER && contains(layout.detailBody, mouseX, mouseY)) {
 			int maxScroll = getDetailScrollMax(layout);
 			if (maxScroll > 0) {
@@ -560,7 +578,7 @@ public class ArmyLedgerScreen extends Screen {
 
 		if (layout.mode == LayoutMode.DRAWER) {
 			context.disableScissor();
-			drawDetailScrollbar(context, layout, detailLayout);
+			drawDetailScrollbar(context, layout, detailLayout.actionsCard.bottom());
 		}
 	}
 
@@ -572,29 +590,37 @@ public class ArmyLedgerScreen extends Screen {
 		context.fill(panel.x, panel.y, panel.right(), panel.y + PANEL_HEADER_HEIGHT, PANEL_HEADER_COLOR);
 		context.fill(panel.x + 12, panel.y + PANEL_HEADER_HEIGHT, panel.right() - 12, panel.y + PANEL_HEADER_HEIGHT + 1, CARD_BORDER);
 		drawTrimmed(context, "Siege Campaign", panel.x + 14, panel.y + 13, 220, TEXT_PRIMARY);
-		drawScaledText(context, "Select an operation and review the threat before locking it in.", panel.right() - 250, panel.y + 15, TEXT_SECONDARY, metaScale(layout.density));
+		drawScaledText(context, "Select an operation and review the threat before locking it in.", panel.right() - 260, panel.y + 15, TEXT_SECONDARY, metaScale(layout.density));
 
+		int scrollOffset = getClampedSiegeListScroll(layout);
+		context.enableScissor(body.x, body.y, body.right(), body.bottom());
 		for (int i = 0; i < snapshot.sieges().size(); i++) {
-			Rect card = siegeCardRect(body, i);
+			Rect card = siegeCardRect(body, i, scrollOffset);
 			ArmyLedgerSnapshot.SiegeEntry siege = snapshot.sieges().get(i);
 			boolean selected = i == selectedSiegeIndex;
+			int accent = siegeAccentColor(siege);
 			int border = selected ? MARKER_SELECTED : CARD_BORDER;
-			int fill = siege.unlocked() ? CARD_COLOR : 0x18222830;
+			int fill = selected ? 0x2636404B : (siege.unlocked() ? CARD_COLOR : 0x18222830);
 			context.fill(card.x, card.y, card.right(), card.bottom(), fill);
 			context.drawBorder(card.x, card.y, card.width, card.height, border);
+			context.fill(card.x, card.y, card.x + 6, card.bottom(), accent);
 
-			drawTrimmed(context, siege.name(), card.x + 12, card.y + 10, card.width - 24, siege.unlocked() ? TEXT_PRIMARY : TEXT_MUTED);
+			drawTrimmed(context, siege.name(), card.x + 16, card.y + 10, card.width - 180, siege.unlocked() ? TEXT_PRIMARY : TEXT_MUTED);
 			String status = siege.unlocked()
 				? (siege.replay() ? "Replay" : "Current Tier")
 				: "Unlocks at " + siege.unlockVictories() + " victories";
-			drawScaledText(context, status, card.x + 12, card.y + 28, siege.unlocked() ? TEXT_WARM : TEXT_MUTED, metaScale(layout.density));
-			drawTrimmed(context, siege.enemySummary(), card.x + 12, card.y + 42, card.width - 24, TEXT_SECONDARY);
-
+			drawScaledText(context, status, card.x + 16, card.y + 28, siege.unlocked() ? TEXT_WARM : TEXT_MUTED, metaScale(layout.density));
+			drawTrimmed(context, siege.enemySummary(), card.x + 16, card.y + 44, card.width - 200, TEXT_SECONDARY);
+			drawChip(context, card.right() - 150, card.y + 10, 56, "Age " + ageShortLabel(siege.ageLevel()), accent, TEXT_PRIMARY);
+			drawChip(context, card.right() - 88, card.y + 10, 62, "+" + siege.warSuppliesReward() + " sup", 0x30546B43, TEXT_PRIMARY);
+			drawWavePips(context, card.x + 16, card.bottom() - 18, Math.min(12, siege.waveSize()), 12, accent);
+			drawSiegeFormationStrip(context, card.x + 140, card.bottom() - 22, siege, accent);
 			if (selected || contains(card, mouseX, mouseY)) {
-				context.fill(card.right() - 24, card.y + 10, card.right() - 10, card.y + 24, 0x24161F27);
-				drawScaledText(context, Integer.toString(siege.waveSize()), card.right() - 21, card.y + 13, TEXT_PRIMARY, metaScale(layout.density));
+				context.drawBorder(card.x + 8, card.y + 8, card.width - 16, card.height - 16, 0x384E6472);
 			}
 		}
+		context.disableScissor();
+		drawPanelScrollbar(context, body, getClampedSiegeListScroll(layout), getSiegeListScrollMax(layout), getSiegeListContentHeight(layout));
 	}
 
 	private void drawSiegeDetailPanel(DrawContext context, Layout layout) {
@@ -615,38 +641,75 @@ public class ArmyLedgerScreen extends Screen {
 			return;
 		}
 
+		int accent = siegeAccentColor(siege);
+		int scrollOffset = getClampedSiegeDetailScroll(layout);
 		SiegeDetailLayout detailLayout = createSiegeDetailLayout(layout);
-		drawCard(context, detailLayout.titleCard());
-		drawCard(context, detailLayout.overviewCard());
-		drawCard(context, detailLayout.actionsCard());
+		Rect titleCard = offsetRect(detailLayout.titleCard(), -scrollOffset);
+		Rect overviewCard = offsetRect(detailLayout.overviewCard(), -scrollOffset);
+		Rect campaignCard = offsetRect(detailLayout.campaignCard(), -scrollOffset);
+		Rect actionsCard = offsetRect(detailLayout.actionsCard(), -scrollOffset);
 
-		drawTrimmed(context, siege.name(), detailLayout.titleCard().x + 12, detailLayout.titleCard().y + 12, detailLayout.titleCard().width - 24, TEXT_PRIMARY);
+		context.enableScissor(body.x, body.y, body.right(), body.bottom());
+
+		drawCard(context, titleCard);
+		drawCard(context, overviewCard);
+		drawCard(context, campaignCard);
+		drawCard(context, actionsCard);
+		context.fill(titleCard.x, titleCard.y, titleCard.x + 6, titleCard.bottom(), accent);
+
+		drawTrimmed(context, siege.name(), titleCard.x + 14, titleCard.y + 12, titleCard.width - 136, TEXT_PRIMARY);
 		String titleStatus = siege.unlocked()
 			? (siege.replay() ? "Replay operation" : "Progress operation")
 			: "Locked until " + siege.unlockVictories() + " victories";
-		drawScaledText(context, titleStatus, detailLayout.titleCard().x + 12, detailLayout.titleCard().y + 34, siege.unlocked() ? TEXT_WARM : TEXT_MUTED, metaScale(layout.density));
+		drawScaledText(context, titleStatus, titleCard.x + 14, titleCard.y + 36, siege.unlocked() ? TEXT_WARM : TEXT_MUTED, metaScale(layout.density));
+		drawChip(context, titleCard.right() - 132, titleCard.y + 12, 60, "Age " + ageShortLabel(siege.ageLevel()), accent, TEXT_PRIMARY);
+		drawChip(context, titleCard.right() - 66, titleCard.y + 12, 54, siege.waveSize() + " wave", 0x2E2E485A, TEXT_PRIMARY);
 
-		int rowY = detailLayout.overviewCard().y + 12;
-		drawWrapped(context, siege.description(), detailLayout.overviewCard().x + 12, rowY, detailLayout.overviewCard().width - 24, TEXT_PRIMARY, 2);
-		rowY += 34;
-		rowY = drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Enemies", siege.enemySummary(), detailLayout.overviewCard().width - 24);
-		rowY = drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Weapons", siege.weaponSummary(), detailLayout.overviewCard().width - 24);
-		rowY = drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Threat", siege.threatSummary(), detailLayout.overviewCard().width - 24);
-		rowY = drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Wave", Integer.toString(siege.waveSize()), detailLayout.overviewCard().width - 24);
-		drawStatRow(context, detailLayout.overviewCard().x + 12, rowY, "Reward", siege.warSuppliesReward() + " war supplies", detailLayout.overviewCard().width - 24);
+		int rowY = overviewCard.y + 12;
+		drawScaledText(context, "Threat Board", overviewCard.x + 12, rowY, TEXT_SECONDARY, metaScale(layout.density));
+		drawWrapped(context, siege.description(), overviewCard.x + 12, rowY + 16, overviewCard.width - 24, TEXT_PRIMARY, 2);
+		drawWavePips(context, overviewCard.x + 12, rowY + 50, Math.min(12, siege.waveSize()), 12, accent);
+		drawScaledText(context, "Wave pressure", overviewCard.x + 118, rowY + 47, TEXT_SECONDARY, metaScale(layout.density));
+		drawSiegeFormationStrip(context, overviewCard.x + 12, rowY + 76, siege, accent);
+		rowY += 104;
+		rowY = drawStatRow(context, overviewCard.x + 12, rowY, "Enemies", siege.enemySummary(), overviewCard.width - 24);
+		rowY = drawStatRow(context, overviewCard.x + 12, rowY, "Weapons", siege.weaponSummary(), overviewCard.width - 24);
+		drawStatRow(context, overviewCard.x + 12, rowY, "Threat", siege.threatSummary(), overviewCard.width - 24);
 
-		int actionY = detailLayout.actionsCard().y + 12;
-		drawScaledText(context, "Campaign", detailLayout.actionsCard().x + 12, actionY, TEXT_SECONDARY, metaScale(layout.density));
-		drawTrimmed(context, snapshot.currentAgeName() + " age - " + snapshot.completedSieges() + " victories", detailLayout.actionsCard().x + 12, actionY + 16, detailLayout.actionsCard().width - 24, TEXT_PRIMARY);
-		drawTrimmed(context, selectedSiegeStatus(siege), detailLayout.actionsCard().x + 12, actionY + 36, detailLayout.actionsCard().width - 24, TEXT_SECONDARY);
+		int campaignY = campaignCard.y + 12;
+		drawScaledText(context, "Campaign Track", campaignCard.x + 12, campaignY, TEXT_SECONDARY, metaScale(layout.density));
+		drawAgeTrack(context, campaignCard.x + 16, campaignY + 28, campaignCard.width - 32, snapshot.currentAgeLevel(), siege.ageLevel());
+		drawProgressBar(
+			context,
+			campaignCard.x + 12,
+			campaignY + 66,
+			campaignCard.width - 24,
+			10,
+			Math.min(snapshot.completedSieges(), Math.max(1, siege.unlockVictories())),
+			Math.max(1, siege.unlockVictories()),
+			accent,
+			0x2236414B
+		);
+		String unlockLabel = siege.unlocked()
+			? (siege.replay() ? "Replay route unlocked" : "Ready to deploy")
+			: snapshot.completedSieges() + "/" + siege.unlockVictories() + " victories to unlock";
+		drawTrimmed(context, unlockLabel, campaignCard.x + 12, campaignY + 82, campaignCard.width - 24, siege.unlocked() ? TEXT_WARM : TEXT_MUTED);
+
+		int actionY = actionsCard.y + 12;
+		drawScaledText(context, "Command Post", actionsCard.x + 12, actionY, TEXT_SECONDARY, metaScale(layout.density));
+		drawTrimmed(context, snapshot.currentAgeName() + " age - " + snapshot.completedSieges() + " victories", actionsCard.x + 12, actionY + 16, actionsCard.width - 24, TEXT_PRIMARY);
+		drawWrapped(context, selectedSiegeStatus(siege), actionsCard.x + 12, actionY + 36, actionsCard.width - 24, TEXT_SECONDARY, 3);
 		String rallyText = snapshot.hasRally() ? snapshot.rallyPos().toShortString() : "Not placed";
-		drawTrimmed(context, "Rally: " + rallyText, detailLayout.actionsCard().x + 12, actionY + 56, detailLayout.actionsCard().width - 24, snapshot.hasRally() ? TEXT_WARM : TEXT_MUTED);
+		drawTrimmed(context, "Rally: " + rallyText, actionsCard.x + 12, actionY + 76, actionsCard.width - 24, snapshot.hasRally() ? TEXT_WARM : TEXT_MUTED);
+
+		context.disableScissor();
+		drawPanelScrollbar(context, body, getClampedSiegeDetailScroll(layout), getSiegeDetailScrollMax(layout), getSiegeDetailContentHeight(layout));
 	}
 
-	private Rect siegeCardRect(Rect body, int index) {
+	private Rect siegeCardRect(Rect body, int index, int scrollOffset) {
 		int gap = 10;
-		int cardHeight = Math.max(68, (body.height - (gap * (snapshot.sieges().size() - 1))) / Math.max(1, snapshot.sieges().size()));
-		int y = body.y + (index * (cardHeight + gap));
+		int cardHeight = siegeCardHeight();
+		int y = body.y + (index * (cardHeight + gap)) - scrollOffset;
 		return new Rect(body.x, y, body.width, cardHeight);
 	}
 
@@ -713,6 +776,66 @@ public class ArmyLedgerScreen extends Screen {
 		context.fill(centerX, centerY - 5, centerX + 1, centerY + 5, 0xE0F0F3F6);
 	}
 
+	private void drawRamMarker(DrawContext context, int x, int y, int color) {
+		context.fill(x, y + 2, x + 10, y + 8, color);
+		context.fill(x + 2, y, x + 8, y + 3, color);
+		context.fill(x + 1, y + 8, x + 3, y + 10, 0xE0F0F3F6);
+		context.fill(x + 7, y + 8, x + 9, y + 10, 0xE0F0F3F6);
+	}
+
+	private void drawChip(DrawContext context, int x, int y, int width, String text, int fillColor, int textColor) {
+		context.fill(x, y, x + width, y + 16, fillColor);
+		context.drawBorder(x, y, width, 16, CARD_BORDER);
+		drawScaledText(context, text, x + 6, y + 4, textColor, 0.85F);
+	}
+
+	private void drawWavePips(DrawContext context, int x, int y, int filledCount, int totalCount, int accent) {
+		for (int i = 0; i < totalCount; i++) {
+			int left = x + (i * 10);
+			int fill = i < filledCount ? accent : 0x2236414B;
+			context.fill(left, y, left + 7, y + 6, fill);
+			context.drawBorder(left, y, 7, 6, CARD_BORDER);
+		}
+	}
+
+	private void drawSiegeFormationStrip(DrawContext context, int x, int y, ArmyLedgerSnapshot.SiegeEntry siege, int accent) {
+		int rangedCount = MathHelper.clamp(Math.max(2, siege.waveSize() / 3), 2, 4);
+		int breacherCount = MathHelper.clamp(Math.max(1, siege.ageLevel() + (siege.hasRam() ? 0 : 1)), 1, 3);
+		for (int i = 0; i < rangedCount; i++) {
+			drawBowMarker(context, x + (i * 14), y + 6, MARKER_ARCHER);
+		}
+		int swordStart = x + (rangedCount * 14) + 12;
+		for (int i = 0; i < breacherCount; i++) {
+			drawSwordMarker(context, swordStart + (i * 14), y + 6, MARKER_SOLDIER);
+		}
+		if (siege.hasRam()) {
+			int ramX = swordStart + (breacherCount * 14) + 12;
+			drawRamMarker(context, ramX, y + 1, accent);
+		}
+	}
+
+	private void drawProgressBar(DrawContext context, int x, int y, int width, int height, int value, int max, int fillColor, int emptyColor) {
+		context.fill(x, y, x + width, y + height, emptyColor);
+		context.drawBorder(x, y, width, height, CARD_BORDER);
+		int filledWidth = MathHelper.clamp(Math.round((value / (float) Math.max(1, max)) * (width - 2)), 0, width - 2);
+		context.fill(x + 1, y + 1, x + 1 + filledWidth, y + height - 1, fillColor);
+	}
+
+	private void drawAgeTrack(DrawContext context, int x, int y, int width, int currentAgeLevel, int siegeAgeLevel) {
+		int stages = 4;
+		int spacing = Math.max(54, width / Math.max(1, stages - 1));
+		for (int i = 0; i < stages; i++) {
+			int nodeX = x + Math.min(width - 16, i * spacing);
+			int color = i == siegeAgeLevel ? MARKER_SELECTED : (i <= currentAgeLevel ? TEXT_WARM : CARD_BORDER);
+			if (i < stages - 1) {
+				context.fill(nodeX + 12, y + 5, Math.min(x + width - 8, nodeX + spacing), y + 7, 0x2836414B);
+			}
+			context.fill(nodeX, y, nodeX + 12, y + 12, color);
+			context.drawBorder(nodeX, y, 12, 12, FRAME_BORDER);
+			drawScaledText(context, ageShortLabel(i), nodeX - 2, y + 16, i == siegeAgeLevel ? TEXT_PRIMARY : TEXT_MUTED, 0.75F);
+		}
+	}
+
 	private int findMarkerHit(double mouseX, double mouseY) {
 		Layout layout = createLayout();
 		List<Marker> markers = buildMarkers(layout.mapBody, computeMapView(layout.mapBody));
@@ -725,8 +848,9 @@ public class ArmyLedgerScreen extends Screen {
 
 	private int findSiegeHit(double mouseX, double mouseY) {
 		Layout layout = createLayout();
+		int scrollOffset = getClampedSiegeListScroll(layout);
 		for (int i = 0; i < snapshot.sieges().size(); i++) {
-			if (contains(siegeCardRect(layout.mapBody, i), mouseX, mouseY)) {
+			if (contains(siegeCardRect(layout.mapBody, i, scrollOffset), mouseX, mouseY)) {
 				return i;
 			}
 		}
@@ -759,10 +883,13 @@ public class ArmyLedgerScreen extends Screen {
 			renameButton.visible = false;
 			cycleRoleButton.visible = false;
 			locateButton.visible = false;
+			int scrollOffset = getClampedSiegeDetailScroll(layout);
+			Rect visibleBody = layout.detailBody;
 			SiegeDetailLayout siegeLayout = createSiegeDetailLayout(layout);
-			int leftX = siegeLayout.actionsCard().x + 12;
-			int rightX = siegeLayout.actionsCard().centerX() + 4;
-			int topY = siegeLayout.actionsCard().y + 86;
+			Rect actions = offsetRect(siegeLayout.actionsCard(), -scrollOffset);
+			int leftX = actions.x + 12;
+			int rightX = actions.centerX() + 4;
+			int topY = actions.y + 98;
 			int buttonWidth = (siegeLayout.actionsCard().width - 32) / 2;
 			previousSiegeButton.setX(leftX);
 			previousSiegeButton.setY(topY);
@@ -776,6 +903,10 @@ public class ArmyLedgerScreen extends Screen {
 			startSiegeButton.setX(leftX);
 			startSiegeButton.setY(topY + 48);
 			startSiegeButton.setWidth(siegeLayout.actionsCard().width - 24);
+			previousSiegeButton.visible = topY >= visibleBody.y && topY + 20 <= visibleBody.bottom();
+			nextSiegeButton.visible = previousSiegeButton.visible;
+			lockSiegeButton.visible = topY + 24 >= visibleBody.y && topY + 44 <= visibleBody.bottom();
+			startSiegeButton.visible = topY + 48 >= visibleBody.y && topY + 68 <= visibleBody.bottom();
 			return;
 		}
 		previousSiegeButton.visible = false;
@@ -869,6 +1000,9 @@ public class ArmyLedgerScreen extends Screen {
 		int mainY = topBar.bottom() + PANEL_GAP;
 		int mainHeight = frame.bottom() - outerInset - mainY;
 		LayoutMode mode = chooseLayoutMode(frame, density, mainHeight);
+		if (ledgerMode == LedgerMode.SIEGES && mode == LayoutMode.DRAWER) {
+			mode = LayoutMode.STACKED;
+		}
 		boolean detailVisible = mode != LayoutMode.DRAWER || detailDrawerOpen;
 		Rect mapPanel;
 		Rect detailPanel;
@@ -1018,6 +1152,7 @@ public class ArmyLedgerScreen extends Screen {
 
 	private void selectSiege(int index) {
 		selectedSiegeIndex = MathHelper.clamp(index, 0, snapshot.sieges().size() - 1);
+		siegeDetailScroll = 0;
 		refreshControls();
 	}
 
@@ -1276,16 +1411,58 @@ public class ArmyLedgerScreen extends Screen {
 		return detailScroll;
 	}
 
+	private int getClampedSiegeListScroll(Layout layout) {
+		int maxScroll = getSiegeListScrollMax(layout);
+		siegeListScroll = MathHelper.clamp(siegeListScroll, 0, maxScroll);
+		return siegeListScroll;
+	}
+
+	private int getClampedSiegeDetailScroll(Layout layout) {
+		int maxScroll = getSiegeDetailScrollMax(layout);
+		siegeDetailScroll = MathHelper.clamp(siegeDetailScroll, 0, maxScroll);
+		return siegeDetailScroll;
+	}
+
 	private int getDetailScrollMax(Layout layout) {
 		if (layout.mode != LayoutMode.DRAWER || !layout.detailVisible) {
 			return 0;
 		}
-		DetailLayout detailLayout = createDetailLayout(layout);
-		int contentHeight = detailLayout.actionsCard.bottom() - layout.detailBody.y;
+		int contentBottom = ledgerMode == LedgerMode.SIEGES
+			? createSiegeDetailLayout(layout).actionsCard().bottom()
+			: createDetailLayout(layout).actionsCard.bottom();
+		int contentHeight = contentBottom - layout.detailBody.y;
 		return Math.max(0, contentHeight - layout.detailBody.height);
 	}
 
-	private void drawDetailScrollbar(DrawContext context, Layout layout, DetailLayout detailLayout) {
+	private int getSiegeListScrollMax(Layout layout) {
+		return Math.max(0, getSiegeListContentHeight(layout) - layout.mapBody.height);
+	}
+
+	private int getSiegeDetailScrollMax(Layout layout) {
+		if (!layout.detailVisible) {
+			return 0;
+		}
+		return Math.max(0, getSiegeDetailContentHeight(layout) - layout.detailBody.height);
+	}
+
+	private int getSiegeListContentHeight(Layout layout) {
+		int gap = 10;
+		int count = snapshot.sieges().size();
+		if (count <= 0) {
+			return layout.mapBody.height;
+		}
+		return (count * siegeCardHeight()) + ((count - 1) * gap);
+	}
+
+	private int getSiegeDetailContentHeight(Layout layout) {
+		return createSiegeDetailLayout(layout).actionsCard().bottom() - layout.detailBody.y;
+	}
+
+	private int siegeCardHeight() {
+		return 96;
+	}
+
+	private void drawDetailScrollbar(DrawContext context, Layout layout, int contentBottom) {
 		int maxScroll = getDetailScrollMax(layout);
 		if (maxScroll <= 0) {
 			return;
@@ -1293,10 +1470,22 @@ public class ArmyLedgerScreen extends Screen {
 		Rect body = layout.detailBody;
 		int trackX = body.right() - 4;
 		context.fill(trackX, body.y, trackX + 2, body.bottom(), CARD_BORDER);
-		int contentHeight = detailLayout.actionsCard.bottom() - body.y;
+		int contentHeight = contentBottom - body.y;
 		int thumbHeight = Math.max(24, Math.round(body.height * (body.height / (float) Math.max(body.height, contentHeight))));
 		int travel = Math.max(1, body.height - thumbHeight);
 		int thumbY = body.y + Math.round((getClampedDetailScroll(layout) / (float) maxScroll) * travel);
+		context.fill(trackX - 1, thumbY, trackX + 3, thumbY + thumbHeight, TEXT_SECONDARY);
+	}
+
+	private void drawPanelScrollbar(DrawContext context, Rect body, int scroll, int maxScroll, int contentHeight) {
+		if (maxScroll <= 0) {
+			return;
+		}
+		int trackX = body.right() - 4;
+		context.fill(trackX, body.y, trackX + 2, body.bottom(), CARD_BORDER);
+		int thumbHeight = Math.max(24, Math.round(body.height * (body.height / (float) Math.max(body.height, contentHeight))));
+		int travel = Math.max(1, body.height - thumbHeight);
+		int thumbY = body.y + Math.round((scroll / (float) maxScroll) * travel);
 		context.fill(trackX - 1, thumbY, trackX + 3, thumbY + thumbHeight, TEXT_SECONDARY);
 	}
 
@@ -1354,6 +1543,12 @@ public class ArmyLedgerScreen extends Screen {
 	private void setLedgerMode(LedgerMode ledgerMode) {
 		this.ledgerMode = ledgerMode;
 		lastLedgerMode = ledgerMode;
+		if (ledgerMode == LedgerMode.SIEGES) {
+			siegeListScroll = 0;
+			siegeDetailScroll = 0;
+		} else {
+			detailScroll = 0;
+		}
 		syncWidgetLayout();
 		refreshControls();
 	}
@@ -1403,16 +1598,56 @@ public class ArmyLedgerScreen extends Screen {
 		return "at peace".equalsIgnoreCase(snapshot.siegePhase());
 	}
 
+	private int siegeAccentColor(ArmyLedgerSnapshot.SiegeEntry siege) {
+		return switch (siege.ageLevel()) {
+			case 0 -> 0xFF6B8A54;
+			case 1 -> 0xFF9A7848;
+			case 2 -> 0xFFAD5548;
+			default -> 0xFF8B6BAF;
+		};
+	}
+
+	private String ageLabel(int ageLevel) {
+		return switch (ageLevel) {
+			case 0 -> "Homestead";
+			case 1 -> "Fortified";
+			case 2 -> "Ironkeep";
+			default -> "Industry";
+		};
+	}
+
+	private String ageShortLabel(int ageLevel) {
+		return switch (ageLevel) {
+			case 0 -> "H";
+			case 1 -> "F";
+			case 2 -> "I";
+			default -> "EI";
+		};
+	}
+
 	private SiegeDetailLayout createSiegeDetailLayout(Layout layout) {
 		Rect body = layout.detailBody;
 		int gap = layout.density == LayoutDensity.COMPACT ? 8 : 10;
-		int titleHeight = 52;
-		int actionsHeight = 122;
-		int overviewHeight = Math.max(128, body.height - titleHeight - actionsHeight - (gap * 2));
+		if (layout.mode == LayoutMode.DRAWER) {
+			int titleHeight = 58;
+			int overviewHeight = 152;
+			int campaignHeight = 108;
+			int actionsHeight = 148;
+			Rect titleCard = new Rect(body.x, body.y, body.width, titleHeight);
+			Rect overviewCard = new Rect(body.x, titleCard.bottom() + gap, body.width, overviewHeight);
+			Rect campaignCard = new Rect(body.x, overviewCard.bottom() + gap, body.width, campaignHeight);
+			Rect actionsCard = new Rect(body.x, campaignCard.bottom() + gap, body.width, actionsHeight);
+			return new SiegeDetailLayout(titleCard, overviewCard, campaignCard, actionsCard);
+		}
+		int titleHeight = 58;
+		int campaignHeight = 108;
+		int actionsHeight = 148;
+		int overviewHeight = Math.max(148, body.height - titleHeight - campaignHeight - actionsHeight - (gap * 3));
 		Rect titleCard = new Rect(body.x, body.y, body.width, titleHeight);
 		Rect overviewCard = new Rect(body.x, titleCard.bottom() + gap, body.width, overviewHeight);
-		Rect actionsCard = new Rect(body.x, overviewCard.bottom() + gap, body.width, Math.max(actionsHeight, body.bottom() - overviewCard.bottom() - gap));
-		return new SiegeDetailLayout(titleCard, overviewCard, actionsCard);
+		Rect campaignCard = new Rect(body.x, overviewCard.bottom() + gap, body.width, campaignHeight);
+		Rect actionsCard = new Rect(body.x, campaignCard.bottom() + gap, body.width, Math.max(actionsHeight, body.bottom() - campaignCard.bottom() - gap));
+		return new SiegeDetailLayout(titleCard, overviewCard, campaignCard, actionsCard);
 	}
 
 	private void drawTrimmed(DrawContext context, String text, int x, int y, int maxWidth, int color) {
@@ -1589,7 +1824,7 @@ public class ArmyLedgerScreen extends Screen {
 	private record DetailLayout(Rect titleCard, Rect portraitCard, Rect statsCard, Rect actionsCard) {
 	}
 
-	private record SiegeDetailLayout(Rect titleCard, Rect overviewCard, Rect actionsCard) {
+	private record SiegeDetailLayout(Rect titleCard, Rect overviewCard, Rect campaignCard, Rect actionsCard) {
 	}
 
 	private record BaseBounds(int minX, int maxX, int minZ, int maxZ) {
