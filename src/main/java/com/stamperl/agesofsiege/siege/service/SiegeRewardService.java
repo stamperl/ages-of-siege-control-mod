@@ -1,5 +1,6 @@
 package com.stamperl.agesofsiege.siege.service;
 
+import com.stamperl.agesofsiege.item.ModItems;
 import com.stamperl.agesofsiege.siege.MedievalLoadouts;
 import com.stamperl.agesofsiege.siege.runtime.SiegeSession;
 import net.minecraft.entity.ItemEntity;
@@ -15,6 +16,7 @@ public final class SiegeRewardService {
 	public void dropVictoryRewards(ServerWorld world, SiegeSession session, BlockPos objectivePos, int ageLevel) {
 		spawnReward(world, objectivePos, new ItemStack(Items.BREAD, 4));
 		spawnReward(world, objectivePos, new ItemStack(Items.IRON_INGOT, 6 + (ageLevel * 2)));
+		spawnReward(world, objectivePos, new ItemStack(ModItems.WAR_SUPPLIES, 3 + ageLevel));
 		for (ItemStack stack : MedievalLoadouts.getVictoryRewards(ageLevel, rewardRandom)) {
 			spawnReward(world, objectivePos, stack);
 		}

@@ -23,7 +23,7 @@ import java.util.UUID;
 
 public final class DefenderRuntimeService {
 	private static final double ARCHER_POST_RADIUS = 1.1D;
-	private static final double ARCHER_MAX_DROP = 1.0D;
+	private static final double ARCHER_MAX_DROP = 0.0D;
 	private static final double ARCHER_BARRIER_PUSH = 0.18D;
 	private static final double ARCHER_BARRIER_LIFT = 0.28D;
 	private static final double ARCHER_RECOVERY_TELEPORT_DROP = 4.0D;
