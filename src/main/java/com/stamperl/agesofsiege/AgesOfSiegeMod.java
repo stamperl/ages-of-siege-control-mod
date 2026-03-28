@@ -4,6 +4,7 @@ import com.stamperl.agesofsiege.command.ModCommands;
 import com.stamperl.agesofsiege.defense.DefenderRuntimeService;
 import com.stamperl.agesofsiege.entity.ModEntities;
 import com.stamperl.agesofsiege.item.ModItems;
+import com.stamperl.agesofsiege.ledger.ArmyLedgerService;
 import com.stamperl.agesofsiege.siege.SiegeDirector;
 import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
@@ -17,6 +18,7 @@ public class AgesOfSiegeMod implements ModInitializer {
 	public void onInitialize() {
 		ModEntities.register();
 		ModItems.register();
+		ArmyLedgerService.registerServer();
 		ModCommands.register();
 		DefenderRuntimeService.register();
 		SiegeDirector.register();

@@ -831,6 +831,10 @@ public class SiegeBaseState extends PersistentState {
 		return dimensionId;
 	}
 
+	public String getClaimedBy() {
+		return claimedBy;
+	}
+
 	public void setObjectiveHealthValue(int objectiveHealth) {
 		this.objectiveHealth = objectiveHealth;
 	}
@@ -884,5 +888,16 @@ public class SiegeBaseState extends PersistentState {
 			markDirty();
 		}
 		return removed;
+	}
+
+	public boolean replacePlacedDefender(UUID entityUuid, PlacedDefender replacement) {
+		for (int i = 0; i < placedDefenders.size(); i++) {
+			if (placedDefenders.get(i).entityUuid().equals(entityUuid)) {
+				placedDefenders.set(i, replacement);
+				markDirty();
+				return true;
+			}
+		}
+		return false;
 	}
 }

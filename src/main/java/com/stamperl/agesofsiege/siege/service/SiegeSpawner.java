@@ -16,6 +16,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.random.Random;
 import net.minecraft.world.Heightmap;
 
 import java.util.ArrayList;
@@ -31,6 +32,7 @@ public final class SiegeSpawner {
 	private static final String RAM_ESCORT_TAG = "ages_of_siege_ram_escort";
 	private static final String RANGED_ROLE_TAG = "ages_of_siege_ranged";
 	private static final String BREACHER_ROLE_TAG = "ages_of_siege_breacher";
+	private final Random siegeRandom = Random.create();
 
 	public void spawnWave(MinecraftServer server, ServerWorld world, SiegeBaseState state, SiegeSession session) {
 		BlockPos basePos = state.getBasePos();
@@ -50,7 +52,7 @@ public final class SiegeSpawner {
 				spawnPos.getX() + 0.5D,
 				spawnPos.getY(),
 				spawnPos.getZ() + 0.5D,
-				world.random.nextFloat() * 360.0F,
+				siegeRandom.nextFloat() * 360.0F,
 				0.0F
 			);
 			attacker.setCanPickUpLoot(false);
@@ -134,7 +136,7 @@ public final class SiegeSpawner {
 				top.getX() + 0.5D,
 				top.getY(),
 				top.getZ() + 0.5D,
-				world.random.nextFloat() * 360.0F,
+				siegeRandom.nextFloat() * 360.0F,
 				0.0F
 			);
 			escort.addCommandTag(RAM_ESCORT_TAG);
@@ -166,7 +168,7 @@ public final class SiegeSpawner {
 			spawnPos.getX() + 0.5D,
 			spawnPos.getY(),
 			spawnPos.getZ() + 0.5D,
-			world.random.nextFloat() * 360.0F,
+			siegeRandom.nextFloat() * 360.0F,
 			0.0F
 		);
 		ram.setCustomName(Text.literal("Battering Ram"));
@@ -192,8 +194,8 @@ public final class SiegeSpawner {
 			state.setRallyPoint(null);
 		}
 
-		double angle = world.random.nextDouble() * (Math.PI * 2.0D);
-		int radius = MathHelper.nextInt(world.random, MIN_SPAWN_RADIUS, MAX_SPAWN_RADIUS);
+		double angle = siegeRandom.nextDouble() * (Math.PI * 2.0D);
+		int radius = MathHelper.nextInt(siegeRandom, MIN_SPAWN_RADIUS, MAX_SPAWN_RADIUS);
 		Vec3d forward = new Vec3d(-Math.cos(angle), 0.0D, -Math.sin(angle)).normalize();
 		Vec3d right = new Vec3d(-forward.z, 0.0D, forward.x);
 		Vec3d center = Vec3d.ofCenter(basePos).add(forward.multiply(-radius));

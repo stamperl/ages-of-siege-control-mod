@@ -23,6 +23,10 @@ public final class ModItems {
 		"raid_rally_banner",
 		new RaidRallyBannerItem(new Item.Settings().maxCount(16))
 	);
+	public static final Item ARMY_LEDGER = register(
+		"army_ledger",
+		new ArmyLedgerItem(new Item.Settings().maxCount(1))
+	);
 	public static final Item ARCHER_TOKEN = register(
 		"archer_token",
 		new DefenderTokenItem(new Item.Settings().maxCount(16), DEFENDER_SPAWNER, DefenderRole.ARCHER)
@@ -43,6 +47,7 @@ public final class ModItems {
 		ItemGroupEvents.modifyEntriesEvent(ItemGroups.TOOLS).register(entries -> {
 			entries.add(SETTLEMENT_STANDARD);
 			entries.add(RAID_RALLY_BANNER);
+			entries.add(ARMY_LEDGER);
 		});
 		ItemGroupEvents.modifyEntriesEvent(ItemGroups.COMBAT).register(entries -> {
 			entries.add(ARCHER_TOKEN);

@@ -165,10 +165,11 @@ public final class ModCommands {
 	}
 
 	private static int giveDevTokens(ServerPlayerEntity player) {
+		player.giveItemStack(new ItemStack(ModItems.ARMY_LEDGER));
 		player.giveItemStack(new ItemStack(ModItems.ARCHER_TOKEN, 8));
 		player.giveItemStack(new ItemStack(ModItems.SOLDIER_TOKEN, 8));
 		player.giveItemStack(new ItemStack(ModItems.DEFENDER_RECALL_TOOL));
-		player.sendMessage(Text.literal("Granted 8 Archer Tokens, 8 Soldier Tokens, and a Defender Recall Tool.").formatted(Formatting.GREEN), false);
+		player.sendMessage(Text.literal("Granted an Army Ledger, 8 Archer Tokens, 8 Soldier Tokens, and a Defender Recall Tool.").formatted(Formatting.GREEN), false);
 		return 1;
 	}
 

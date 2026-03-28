@@ -61,15 +61,14 @@ public final class DefenderSpawnerService {
 				player.getYaw(),
 				0.0F
 			);
-			living.setCustomName(Text.literal(role.displayName() + " Guard"));
-			living.setCustomNameVisible(false);
+			applyDisplayName(living, role.displayName() + " Guard");
 			living.addCommandTag(DEFENDER_TAG);
 			living.addCommandTag(role.entityTag());
 			if (living instanceof MobEntity mob) {
 				mob.setPersistent();
 				mob.setCanPickUpLoot(false);
 			}
-			equipRole(living, role);
+			applyRoleLoadout(living, role);
 			world.spawnEntity(living);
 			spawned++;
 		}
@@ -129,8 +128,8 @@ public final class DefenderSpawnerService {
 			player.getYaw(),
 			0.0F
 		);
-		living.setCustomName(Text.literal(role.displayName() + " Guard"));
-		living.setCustomNameVisible(false);
+		String defenderName = role.displayName() + " Guard";
+		applyDisplayName(living, defenderName);
 		living.addCommandTag(DEFENDER_TAG);
 		living.addCommandTag(BOUND_DEFENDER_TAG);
 		living.addCommandTag(role.entityTag());
@@ -138,7 +137,7 @@ public final class DefenderSpawnerService {
 			mob.setPersistent();
 			mob.setCanPickUpLoot(false);
 		}
-		equipRole(living, role);
+		applyRoleLoadout(living, role);
 		player.getServerWorld().spawnEntity(living);
 
 		state.addPlacedDefender(new PlacedDefender(
@@ -150,7 +149,8 @@ public final class DefenderSpawnerService {
 			state.getBasePos(),
 			state.getDimensionId(),
 			player.getGameProfile().getName(),
-			player.getUuid()
+			player.getUuid(),
+			defenderName
 		));
 
 		if (!player.getAbilities().creativeMode) {
@@ -164,7 +164,12 @@ public final class DefenderSpawnerService {
 		return true;
 	}
 
-	private void equipRole(LivingEntity defender, DefenderRole role) {
+	public static void applyDisplayName(LivingEntity defender, String displayName) {
+		defender.setCustomName(Text.literal(displayName));
+		defender.setCustomNameVisible(false);
+	}
+
+	public static void applyRoleLoadout(LivingEntity defender, DefenderRole role) {
 		if (role == DefenderRole.ARCHER) {
 			defender.equipStack(EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
 			defender.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.ARROW, 64));

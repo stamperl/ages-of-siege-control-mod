@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Army Command Table Mockup</title>
+  <style>
+    :root {
+      --bg: #111418;
+      --panel: #1a2026;
+      --panel-2: #222b33;
+      --line: #3a4753;
+      --paper: #d7cfb7;
+      --paper-2: #c7b88f;
+      --ink: #1d1b16;
+      --muted: #6b6559;
+      --gold: #b89b54;
+      --steel: #8ea4b5;
+      --red: #ad5548;
+      --green: #6c8c5c;
+      --blue: #5f83a8;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top, #1d2530 0%, #0d1014 60%),
+        var(--bg);
+      color: #eef1f4;
+      font-family: Georgia, "Times New Roman", serif;
+      padding: 20px;
+    }
+
+    .page {
+      max-width: 1680px;
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
+    }
+
+    .note {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 16px 18px;
+      color: #dfe6eb;
+    }
+
+    .note h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    .note p {
+      margin: 6px 0 0;
+      color: #bfc7cf;
+      font-size: 16px;
+    }
+
+    .mockup {
+      background: linear-gradient(180deg, #101418, #0d1014);
+      border: 1px solid #2a323a;
+      border-radius: 18px;
+      box-shadow: 0 20px 60px var(--shadow);
+      padding: 18px;
+    }
+
+    .frame {
+      background: linear-gradient(180deg, #151c22, #12181d);
+      border: 2px solid #303a43;
+      border-radius: 14px;
+      padding: 16px;
+      min-height: 780px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 14px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr 1fr 1fr;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .status-card {
+      background: linear-gradient(180deg, #1e262d, #182026);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      min-height: 72px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .status-card .label {
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #93a2af;
+      font-family: "Trebuchet MS", Arial, sans-serif;
+    }
+
+    .status-card .value {
+      font-size: 26px;
+      color: #edf2f6;
+      line-height: 1.05;
+    }
+
+    .status-card.small .value {
+      font-size: 22px;
+    }
+
+    .main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 14px;
+      min-height: 0;
+    }
+
+    .map-shell,
+    .detail-shell {
+      background: linear-gradient(180deg, #1b232a, #171e24);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid #33404b;
+      background: rgba(255, 255, 255, 0.03);
+      font-family: "Trebuchet MS", Arial, sans-serif;
+    }
+
+    .panel-header .title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #eef1f3;
+    }
+
+    .panel-header .meta {
+      font-size: 13px;
+      color: #98a7b2;
+    }
+
+    .map-area {
+      position: relative;
+      height: 100%;
+      min-height: 560px;
+      background:
+        linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px),
+        radial-gradient(circle at 30% 35%, rgba(255,255,255,0.02), transparent 36%),
+        linear-gradient(180deg, #27333d 0%, #1f2932 100%);
+      background-size: 48px 48px, 48px 48px, auto, auto;
+    }
+
+    .terrain {
+      position: absolute;
+      inset: 24px;
+      background:
+        radial-gradient(circle at 48% 49%, rgba(184,155,84,0.12), transparent 24%),
+        linear-gradient(180deg, rgba(95,131,168,0.06), transparent 16%),
+        #20372a;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .wall,
+    .road,
+    .tower,
+    .banner,
+    .guard,
+    .post,
+    .ring,
+    .label {
+      position: absolute;
+    }
+
+    .wall {
+      border: 3px solid rgba(196, 183, 150, 0.85);
+      background: rgba(102, 109, 114, 0.18);
+      border-radius: 6px;
+    }
+
+    .road {
+      background: rgba(145, 113, 76, 0.85);
+      border-radius: 999px;
+    }
+
+    .tower {
+      width: 18px;
+      height: 18px;
+      background: #c6b796;
+      border: 2px solid #6d6559;
+      border-radius: 4px;
+      box-shadow: 0 0 0 3px rgba(0,0,0,0.18);
+    }
+
+    .banner {
+      width: 18px;
+      height: 18px;
+      background: var(--gold);
+      clip-path: polygon(30% 0%, 100% 0%, 82% 42%, 100% 82%, 30% 82%, 30% 100%, 0% 100%, 0% 0%);
+      box-shadow: 0 0 0 3px rgba(0,0,0,0.22);
+    }
+
+    .post {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.6);
+      background: rgba(255,255,255,0.08);
+      transform: rotate(45deg);
+    }
+
+    .guard {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      box-shadow: 0 0 0 3px rgba(0,0,0,0.22);
+      cursor: pointer;
+    }
+
+    .guard.archer {
+      background: var(--blue);
+    }
+
+    .guard.soldier {
+      background: var(--paper-2);
+    }
+
+    .guard.selected {
+      background: var(--red);
+      z-index: 3;
+    }
+
+    .ring {
+      width: 34px;
+      height: 34px;
+      border: 2px solid rgba(237, 242, 246, 0.85);
+      border-radius: 50%;
+      transform: translate(-9px, -9px);
+      z-index: 2;
+    }
+
+    .label {
+      padding: 3px 6px;
+      background: rgba(12, 15, 19, 0.8);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 6px;
+      color: #d9e0e5;
+      font-size: 12px;
+      font-family: "Trebuchet MS", Arial, sans-serif;
+      white-space: nowrap;
+    }
+
+    .map-toolbar {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .chip {
+      background: rgba(15, 19, 24, 0.86);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 999px;
+      color: #d7dfe6;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: "Trebuchet MS", Arial, sans-serif;
+    }
+
+    .detail-body {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 14px;
+      padding: 14px;
+      height: calc(100% - 53px);
+    }
+
+    .portrait {
+      min-height: 180px;
+      background: linear-gradient(180deg, #262f38, #202830);
+      border: 1px solid #384652;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      color: #a5b0b8;
+      font-size: 20px;
+    }
+
+    .detail-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 12px;
+    }
+
+    .detail-title {
+      font-size: 28px;
+      line-height: 1.05;
+      color: #eef2f5;
+      margin-bottom: 8px;
+    }
+
+    .detail-subtitle {
+      color: #9aa9b3;
+      font-size: 15px;
+      font-family: "Trebuchet MS", Arial, sans-serif;
+    }
+
+    .stats {
+      display: grid;
+      gap: 10px;
+    }
+
+    .stat-row {
+      display: grid;
+      grid-template-columns: 92px 1fr;
+      gap: 10px;
+      color: #e5ebef;
+      font-size: 16px;
+      min-height: 22px;
+      align-items: center;
+    }
+
+    .stat-row .label {
+      position: static;
+      padding: 0;
+      background: none;
+      border: 0;
+      color: #93a2af;
+      font-size: 14px;
+      font-family: "Trebuchet MS", Arial, sans-serif;
+    }
+
+    .actions {
+      display: grid;
+      gap: 10px;
+    }
+
+    .field-label {
+      font-size: 13px;
+      color: #98a7b2;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-family: "Trebuchet MS", Arial, sans-serif;
+    }
+
+    .field {
+      min-height: 42px;
+      border-radius: 8px;
+      border: 1px solid #4a5864;
+      background: #11171c;
+      color: #eef2f5;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      font-size: 16px;
+    }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .button {
+      min-height: 42px;
+      border-radius: 8px;
+      border: 1px solid #52606a;
+      background: linear-gradient(180deg, #7d8c99, #61707b);
+      color: white;
+      display: grid;
+      place-items: center;
+      font-family: "Trebuchet MS", Arial, sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .button.primary {
+      background: linear-gradient(180deg, #c6a866, #a88743);
+      color: #201a0d;
+      border-color: #8f7339;
+    }
+
+    .bottom-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 999px;
+      color: #d6dee4;
+      font-size: 13px;
+      font-family: "Trebuchet MS", Arial, sans-serif;
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .square {
+      width: 12px;
+      height: 12px;
+      transform: rotate(45deg);
+      border: 1px solid rgba(255,255,255,0.7);
+    }
+
+    @media (max-width: 1300px) {
+      .main {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="note" contenteditable="true">
+      <h1>Army Command Table Mockup</h1>
+      <p>Fresh direction: no book frame, no roster-first interaction, no filler text. The map is primary and the right panel updates when a guard marker is clicked.</p>
+    </section>
+
+    <section class="mockup">
+      <div class="frame">
+        <div class="topbar">
+          <div class="status-card">
+            <div class="label">Settlement</div>
+            <div class="value" contenteditable="true">HSStamper Hold</div>
+          </div>
+          <div class="status-card small">
+            <div class="label">Phase</div>
+            <div class="value" contenteditable="true">At Peace</div>
+          </div>
+          <div class="status-card small">
+            <div class="label">Garrison</div>
+            <div class="value" contenteditable="true">7 Guards</div>
+          </div>
+          <div class="status-card small">
+            <div class="label">On Post</div>
+            <div class="value" contenteditable="true">6 Ready</div>
+          </div>
+        </div>
+
+        <div class="main">
+          <div class="map-shell">
+            <div class="panel-header">
+              <div class="title" contenteditable="true">Tactical Map</div>
+              <div class="meta" contenteditable="true">Click a guard marker to inspect and command</div>
+            </div>
+            <div class="map-area">
+              <div class="terrain">
+                <div class="wall" style="left: 18%; top: 18%; width: 44%; height: 46%;"></div>
+                <div class="wall" style="left: 40%; top: 62%; width: 20%; height: 8%;"></div>
+                <div class="road" style="left: 48%; top: 0; width: 4%; height: 84%;"></div>
+                <div class="road" style="left: 48%; top: 62%; width: 18%; height: 4%;"></div>
+
+                <div class="tower" style="left: 16%; top: 16%;"></div>
+                <div class="tower" style="left: 60%; top: 16%;"></div>
+                <div class="tower" style="left: 16%; top: 62%;"></div>
+                <div class="tower" style="left: 60%; top: 62%;"></div>
+
+                <div class="post" style="left: 30%; top: 22%;"></div>
+                <div class="post" style="left: 52%; top: 24%;"></div>
+                <div class="post" style="left: 58%; top: 49%;"></div>
+                <div class="post" style="left: 37%; top: 58%;"></div>
+
+                <div class="banner" style="left: 45%; top: 41%;"></div>
+
+                <div class="guard archer" style="left: 28%; top: 22%;"></div>
+                <div class="guard soldier" style="left: 57%; top: 48%;"></div>
+                <div class="guard archer selected" style="left: 51%; top: 25%;"></div>
+                <div class="ring" style="left: 51%; top: 25%;"></div>
+                <div class="guard soldier" style="left: 38%; top: 57%;"></div>
+
+                <div class="label" style="left: 54%; top: 19%;" contenteditable="true">Archer Guard</div>
+                <div class="label" style="left: 45%; top: 46%;" contenteditable="true">Banner</div>
+              </div>
+
+              <div class="map-toolbar">
+                <div class="chip" contenteditable="true">Map Layer: Posts</div>
+                <div class="chip" contenteditable="true">Zoom: 1x</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="detail-shell">
+            <div class="panel-header">
+              <div class="title" contenteditable="true">Guard Detail</div>
+              <div class="meta" contenteditable="true">Selected from map</div>
+            </div>
+            <div class="detail-body">
+              <div class="detail-card">
+                <div class="detail-title" contenteditable="true">Archer Guard</div>
+                <div class="detail-subtitle" contenteditable="true">North wall archer post</div>
+              </div>
+
+              <div class="portrait" contenteditable="true">Portrait / Model</div>
+
+              <div class="detail-card">
+                <div class="stats">
+                  <div class="stat-row"><div class="label">Role</div><div contenteditable="true">Archer</div></div>
+                  <div class="stat-row"><div class="label">Health</div><div contenteditable="true">20 / 20</div></div>
+                  <div class="stat-row"><div class="label">Armor</div><div contenteditable="true">Chain Mail</div></div>
+                  <div class="stat-row"><div class="label">Attack</div><div contenteditable="true">6</div></div>
+                  <div class="stat-row"><div class="label">Post</div><div contenteditable="true">7, -57, 11</div></div>
+                  <div class="stat-row"><div class="label">Status</div><div contenteditable="true">Ready</div></div>
+                </div>
+              </div>
+
+              <div class="detail-card">
+                <div class="actions">
+                  <div class="field-label" contenteditable="true">Rename Guard</div>
+                  <div class="field" contenteditable="true">Archer Guard</div>
+                  <div class="button-grid">
+                    <div class="button primary" contenteditable="true">Apply Name</div>
+                    <div class="button" contenteditable="true">Cycle Role</div>
+                    <div class="button" contenteditable="true">Locate</div>
+                    <div class="button" contenteditable="true">Inspect Gear</div>
+                    <div class="button" contenteditable="true">Change Loadout</div>
+                    <div class="button" contenteditable="true">Reassign Post</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bottom-bar">
+          <div class="legend-item"><span class="dot" style="background: var(--blue);"></span><span contenteditable="true">Archer</span></div>
+          <div class="legend-item"><span class="dot" style="background: var(--paper-2);"></span><span contenteditable="true">Soldier</span></div>
+          <div class="legend-item"><span class="dot" style="background: var(--red);"></span><span contenteditable="true">Selected Guard</span></div>
+          <div class="legend-item"><span class="square"></span><span contenteditable="true">Guard Post</span></div>
+          <div class="legend-item"><span class="dot" style="background: var(--gold);"></span><span contenteditable="true">Banner</span></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

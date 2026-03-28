@@ -15,7 +15,8 @@ public record PlacedDefender(
 	BlockPos settlementBannerPos,
 	String settlementDimensionId,
 	String ownerName,
-	UUID ownerUuid
+	UUID ownerUuid,
+	String defenderName
 ) {
 	public NbtCompound toNbt() {
 		NbtCompound nbt = new NbtCompound();
@@ -40,6 +41,9 @@ public record PlacedDefender(
 		if (ownerUuid != null) {
 			nbt.putUuid("ownerUuid", ownerUuid);
 		}
+		if (defenderName != null) {
+			nbt.putString("defenderName", defenderName);
+		}
 		return nbt;
 	}
 
@@ -56,7 +60,8 @@ public record PlacedDefender(
 			bannerPos,
 			nbt.contains("settlementDimensionId") ? nbt.getString("settlementDimensionId") : null,
 			nbt.contains("ownerName") ? nbt.getString("ownerName") : null,
-			nbt.containsUuid("ownerUuid") ? nbt.getUuid("ownerUuid") : null
+			nbt.containsUuid("ownerUuid") ? nbt.getUuid("ownerUuid") : null,
+			nbt.contains("defenderName") ? nbt.getString("defenderName") : null
 		);
 	}
 }

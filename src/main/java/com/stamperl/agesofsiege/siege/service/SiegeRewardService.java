@@ -7,12 +7,15 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.random.Random;
 
 public final class SiegeRewardService {
+	private final Random rewardRandom = Random.create();
+
 	public void dropVictoryRewards(ServerWorld world, SiegeSession session, BlockPos objectivePos, int ageLevel) {
 		spawnReward(world, objectivePos, new ItemStack(Items.BREAD, 4));
 		spawnReward(world, objectivePos, new ItemStack(Items.IRON_INGOT, 6 + (ageLevel * 2)));
-		for (ItemStack stack : MedievalLoadouts.getVictoryRewards(ageLevel, world.random)) {
+		for (ItemStack stack : MedievalLoadouts.getVictoryRewards(ageLevel, rewardRandom)) {
 			spawnReward(world, objectivePos, stack);
 		}
 

@@ -7,6 +7,7 @@ import com.stamperl.agesofsiege.siege.runtime.SiegePlan;
 import com.stamperl.agesofsiege.siege.runtime.SiegePlanType;
 import com.stamperl.agesofsiege.siege.runtime.SiegeSession;
 import com.stamperl.agesofsiege.siege.runtime.UnitRole;
+import com.stamperl.agesofsiege.state.PlacedDefender;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
@@ -28,6 +29,7 @@ public final class SiegeUnitController {
 	private static final double PLAYER_AGGRO_RANGE = 12.0D;
 	private static final double RANGED_AGGRO_RANGE = 18.0D;
 	private static final double ESCORT_RANGE = 5.0D;
+	private static final double DEFENDER_SCREEN_RANGE = 12.0D;
 
 	private final ObjectiveService objectiveService = new ObjectiveService();
 	private final RamController ramController = new RamController();
@@ -42,6 +44,7 @@ public final class SiegeUnitController {
 		SiegePlan plan = session.getCurrentPlan();
 		BlockPos objectivePos = session.getObjectivePos();
 		List<Vec3d> breacherPositions = new ArrayList<>();
+		List<LivingEntity> placedDefenders = resolvePlacedDefenders(world, state);
 
 		for (UUID attackerId : session.getAttackerIds()) {
 			Entity entity = world.getEntity(attackerId);
@@ -54,8 +57,8 @@ public final class SiegeUnitController {
 			}
 			switch (role) {
 				case BREACHER -> controlBreacher(hostile, world, state, session, plan, objectivePos);
-				case RANGED -> controlRanged(hostile, world, session, plan, objectivePos, breacherPositions);
-				case ESCORT -> controlEscort(hostile, world, session, plan, objectivePos, breacherPositions);
+				case RANGED -> controlRanged(hostile, world, state, session, plan, objectivePos, breacherPositions, placedDefenders);
+				case ESCORT -> controlEscort(hostile, world, state, session, plan, objectivePos, breacherPositions, placedDefenders);
 				case RAM -> {
 				}
 			}
@@ -116,9 +119,23 @@ public final class SiegeUnitController {
 		attackObjective(hostile, world, state, session, objectivePos);
 	}
 
-	private void controlRanged(HostileEntity hostile, ServerWorld world, SiegeSession session, SiegePlan plan, BlockPos objectivePos, List<Vec3d> breacherPositions) {
+	private void controlRanged(
+		HostileEntity hostile,
+		ServerWorld world,
+		SiegeBaseState state,
+		SiegeSession session,
+		SiegePlan plan,
+		BlockPos objectivePos,
+		List<Vec3d> breacherPositions,
+		List<LivingEntity> placedDefenders
+	) {
 		if (session.getPhase() == SiegePhase.FORM_UP) {
 			moveToFormation(hostile, world, session);
+			return;
+		}
+		LivingEntity defenderTarget = getNearbyDefenderTarget(hostile, placedDefenders, breacherPositions, DEFENDER_SCREEN_RANGE);
+		if (defenderTarget != null) {
+			hostile.setTarget(defenderTarget);
 			return;
 		}
 		PlayerEntity playerTarget = getNearbyPlayer(world, hostile, RANGED_AGGRO_RANGE);
@@ -144,9 +161,24 @@ public final class SiegeUnitController {
 		moveToward(hostile, world, offset, 0.9D);
 	}
 
-	private void controlEscort(HostileEntity hostile, ServerWorld world, SiegeSession session, SiegePlan plan, BlockPos objectivePos, List<Vec3d> breacherPositions) {
+	private void controlEscort(
+		HostileEntity hostile,
+		ServerWorld world,
+		SiegeBaseState state,
+		SiegeSession session,
+		SiegePlan plan,
+		BlockPos objectivePos,
+		List<Vec3d> breacherPositions,
+		List<LivingEntity> placedDefenders
+	) {
 		if (session.getPhase() == SiegePhase.FORM_UP) {
 			moveToFormation(hostile, world, session);
+			return;
+		}
+		LivingEntity defenderTarget = getNearbyDefenderTarget(hostile, placedDefenders, breacherPositions, DEFENDER_SCREEN_RANGE);
+		if (defenderTarget != null) {
+			hostile.setTarget(defenderTarget);
+			moveToward(hostile, world, defenderTarget.getPos(), 1.0D);
 			return;
 		}
 		PlayerEntity playerTarget = getNearbyPlayer(world, hostile, PLAYER_AGGRO_RANGE);
@@ -303,5 +335,51 @@ public final class SiegeUnitController {
 
 	private SiegeBaseState stateFor(ServerWorld world) {
 		return SiegeBaseState.get(world.getServer());
+	}
+
+	private List<LivingEntity> resolvePlacedDefenders(ServerWorld world, SiegeBaseState state) {
+		List<LivingEntity> defenders = new ArrayList<>();
+		for (PlacedDefender placedDefender : state.getPlacedDefenders()) {
+			Entity entity = world.getEntity(placedDefender.entityUuid());
+			if (entity instanceof LivingEntity living && living.isAlive()) {
+				defenders.add(living);
+			}
+		}
+		return defenders;
+	}
+
+	private LivingEntity getNearbyDefenderTarget(
+		HostileEntity hostile,
+		List<LivingEntity> placedDefenders,
+		List<Vec3d> breacherPositions,
+		double range
+	) {
+		LivingEntity nearest = null;
+		double bestDistance = range * range;
+		for (LivingEntity defender : placedDefenders) {
+			double attackerDistance = hostile.squaredDistanceTo(defender);
+			if (attackerDistance > bestDistance) {
+				continue;
+			}
+			if (!isNearBreacherLine(defender.getPos(), breacherPositions, range)) {
+				continue;
+			}
+			bestDistance = attackerDistance;
+			nearest = defender;
+		}
+		return nearest;
+	}
+
+	private boolean isNearBreacherLine(Vec3d defenderPos, List<Vec3d> breacherPositions, double range) {
+		if (breacherPositions.isEmpty()) {
+			return true;
+		}
+		double maxDistanceSq = range * range;
+		for (Vec3d breacherPos : breacherPositions) {
+			if (breacherPos.squaredDistanceTo(defenderPos) <= maxDistanceSq) {
+				return true;
+			}
+		}
+		return false;
 	}
 }
