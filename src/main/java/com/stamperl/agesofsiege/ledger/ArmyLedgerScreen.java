@@ -63,6 +63,14 @@ public class ArmyLedgerScreen extends Screen {
 	private static final int MARKER_OFFLINE = 0xFF6E7177;
 	private static final int MARKER_POST = 0x80FFFFFF;
 	private static final int MARKER_BANNER = 0xFFB89B54;
+	private static final int SAMPLE_NATURAL = 0;
+	private static final int SAMPLE_PATH = 1;
+	private static final int SAMPLE_WOOD = 2;
+	private static final int SAMPLE_STONE = 3;
+	private static final int SAMPLE_WATER = 4;
+	private static final int SAMPLE_SAND = 5;
+	private static final int SAMPLE_FOLIAGE = 6;
+	private static final int SAMPLE_CROP = 7;
 
 	private static UUID lastSelectedDefenderId;
 
@@ -76,6 +84,7 @@ public class ArmyLedgerScreen extends Screen {
 
 	private MapView cachedMapBounds;
 	private int[] cachedMapColors = new int[0];
+	private byte[] cachedMapKinds = new byte[0];
 	private int cachedSamplesX = -1;
 	private int cachedSamplesZ = -1;
 	private long cachedMapTick = Long.MIN_VALUE;
@@ -306,8 +315,40 @@ public class ArmyLedgerScreen extends Screen {
 			for (int sampleX = 0; sampleX < cachedSamplesX; sampleX++) {
 				int x0 = body.x + Math.round(sampleX * body.width / (float) cachedSamplesX);
 				int x1 = body.x + Math.round((sampleX + 1) * body.width / (float) cachedSamplesX);
-				context.fill(x0, y0, x1, y1, cachedMapColors[sampleZ * cachedSamplesX + sampleX]);
+				int index = sampleZ * cachedSamplesX + sampleX;
+				context.fill(x0, y0, x1, y1, cachedMapColors[index]);
+				if (x1 - x0 > 2 && y1 - y0 > 2) {
+					drawFeatureEdge(context, x0, y0, x1, y1, sampleX, sampleZ, index);
+				}
 			}
+		}
+	}
+
+	private void drawFeatureEdge(DrawContext context, int x0, int y0, int x1, int y1, int sampleX, int sampleZ, int index) {
+		byte kind = cachedMapKinds[index];
+		if (kind == SAMPLE_NATURAL || kind == SAMPLE_FOLIAGE) {
+			return;
+		}
+		int edgeColor = switch (kind) {
+			case SAMPLE_PATH -> 0x505A4426;
+			case SAMPLE_WOOD -> 0x6050321D;
+			case SAMPLE_STONE -> 0x60656A70;
+			case SAMPLE_WATER -> 0x50536F9A;
+			case SAMPLE_SAND -> 0x50A58F59;
+			case SAMPLE_CROP -> 0x50578E2E;
+			default -> 0x4036404B;
+		};
+		if (sampleX == 0 || cachedMapKinds[index - 1] != kind) {
+			context.fill(x0, y0, x0 + 1, y1, edgeColor);
+		}
+		if (sampleZ == 0 || cachedMapKinds[index - cachedSamplesX] != kind) {
+			context.fill(x0, y0, x1, y0 + 1, edgeColor);
+		}
+		if (sampleX == cachedSamplesX - 1 || cachedMapKinds[index + 1] != kind) {
+			context.fill(x1 - 1, y0, x1, y1, edgeColor);
+		}
+		if (sampleZ == cachedSamplesZ - 1 || cachedMapKinds[index + cachedSamplesX] != kind) {
+			context.fill(x0, y1 - 1, x1, y1, edgeColor);
 		}
 	}
 
@@ -728,8 +769,9 @@ public class ArmyLedgerScreen extends Screen {
 
 	private void ensureMapCache(Rect body, MapView bounds) {
 		ClientWorld world = this.client == null ? null : this.client.world;
-		int samplesX = MathHelper.clamp(Math.round((body.width / 10.0F) * MathHelper.clamp(mapZoom, 1.0F, 3.0F)), 28, 140);
-		int samplesZ = MathHelper.clamp(Math.round((body.height / 10.0F) * MathHelper.clamp(mapZoom, 1.0F, 3.0F)), 20, 110);
+		float detailScale = MathHelper.clamp(0.85F + (mapZoom * 0.9F), 1.0F, 3.6F);
+		int samplesX = MathHelper.clamp(Math.round((body.width / 7.0F) * detailScale), 40, 240);
+		int samplesZ = MathHelper.clamp(Math.round((body.height / 7.0F) * detailScale), 30, 180);
 		long tick = world == null ? -1L : world.getTime() / 10L;
 		if (cachedMapBounds != null && cachedMapBounds.equals(bounds) && cachedSamplesX == samplesX && cachedSamplesZ == samplesZ && cachedMapTick == tick) {
 			return;
@@ -740,6 +782,7 @@ public class ArmyLedgerScreen extends Screen {
 		cachedSamplesZ = samplesZ;
 		cachedMapTick = tick;
 		cachedMapColors = new int[samplesX * samplesZ];
+		cachedMapKinds = new byte[samplesX * samplesZ];
 
 		for (int sampleZ = 0; sampleZ < samplesZ; sampleZ++) {
 			float zProgress = (sampleZ + 0.5F) / samplesZ;
@@ -747,21 +790,25 @@ public class ArmyLedgerScreen extends Screen {
 			for (int sampleX = 0; sampleX < samplesX; sampleX++) {
 				float xProgress = (sampleX + 0.5F) / samplesX;
 				int worldX = MathHelper.floor(MathHelper.lerp(xProgress, bounds.minX, bounds.maxX));
-				cachedMapColors[sampleZ * samplesX + sampleX] = sampleMapColor(world, worldX, worldZ, snapshot.bannerPos().getY(), bounds);
+				MapSample sample = sampleMapColor(world, worldX, worldZ, snapshot.bannerPos().getY(), bounds);
+				int index = sampleZ * samplesX + sampleX;
+				cachedMapColors[index] = sample.color();
+				cachedMapKinds[index] = sample.kind();
 			}
 		}
 	}
 
-	private int sampleMapColor(ClientWorld world, int x, int z, int fallbackY, MapView bounds) {
+	private MapSample sampleMapColor(ClientWorld world, int x, int z, int fallbackY, MapView bounds) {
 		if (world == null) {
-			return 0xFF2B3C2F;
+			return new MapSample(0xFF2B3C2F, (byte) SAMPLE_NATURAL);
 		}
 		int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z) - 1;
 		int sampleY = Math.max(world.getBottomY(), topY > world.getBottomY() ? topY : fallbackY);
 		BlockPos samplePos = new BlockPos(x, sampleY, z);
 		BlockState state = world.getBlockState(samplePos);
+		byte kind = classifyBlock(state);
 		MapColor mapColor = state.getMapColor(world, samplePos);
-		int baseColor = mapColor == MapColor.CLEAR ? fallbackBlockColor(state) : mapColor.color | 0xFF000000;
+		int baseColor = mapColor == MapColor.CLEAR ? fallbackBlockColor(state, kind) : tintBlockColor((mapColor.color | 0xFF000000), kind);
 
 		int northY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z - 1) - 1;
 		int southY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z + 1) - 1;
@@ -771,37 +818,91 @@ public class ArmyLedgerScreen extends Screen {
 		float shade = 1.0F + MathHelper.clamp(slope * 0.05F, -0.16F, 0.16F);
 		float distance = (Math.abs(x - snapshot.bannerPos().getX()) + Math.abs(z - snapshot.bannerPos().getZ()))
 			/ (float) Math.max(1, (bounds.maxX - bounds.minX) + (bounds.maxZ - bounds.minZ));
-		float focus = 1.0F - (distance * 0.06F);
-		return shadeColor(baseColor, shade * focus);
+		float focus = 1.02F - (distance * 0.03F);
+		float contrast = switch (kind) {
+			case SAMPLE_PATH, SAMPLE_WOOD, SAMPLE_STONE, SAMPLE_CROP -> 1.08F;
+			case SAMPLE_WATER, SAMPLE_SAND -> 1.04F;
+			default -> 1.0F;
+		};
+		return new MapSample(shadeColor(baseColor, shade * focus * contrast), kind);
 	}
 
-	private int fallbackBlockColor(BlockState state) {
+	private byte classifyBlock(BlockState state) {
 		String id = String.valueOf(Registries.BLOCK.getId(state.getBlock()));
 		if (id.contains("water")) {
-			return 0xFF6E93B7;
+			return (byte) SAMPLE_WATER;
 		}
+		if (id.contains("path") || id.contains("road")) {
+			return (byte) SAMPLE_PATH;
+		}
+		if (id.contains("farmland") || id.contains("crop") || id.contains("wheat") || id.contains("carrot") || id.contains("potato") || id.contains("beetroot")) {
+			return (byte) SAMPLE_CROP;
+		}
+		if (id.contains("sand") || id.contains("gravel")) {
+			return (byte) SAMPLE_SAND;
+		}
+		if (id.contains("brick") || id.contains("stone") || id.contains("cobblestone") || id.contains("deepslate")) {
+			return (byte) SAMPLE_STONE;
+		}
+		if (id.contains("log") || id.contains("planks") || id.contains("wood") || id.contains("fence") || id.contains("slab") || id.contains("stairs")) {
+			return (byte) SAMPLE_WOOD;
+		}
+		if (id.contains("leaves") || id.contains("moss") || id.contains("vine")) {
+			return (byte) SAMPLE_FOLIAGE;
+		}
+		return (byte) SAMPLE_NATURAL;
+	}
+
+	private int fallbackBlockColor(BlockState state, byte kind) {
+		String id = String.valueOf(Registries.BLOCK.getId(state.getBlock()));
 		if (id.contains("lava")) {
 			return 0xFFB35A2E;
 		}
-		if (id.contains("sand") || id.contains("gravel") || id.contains("path")) {
-			return 0xFFD4BE8C;
-		}
-		if (id.contains("log") || id.contains("planks") || id.contains("wood")) {
-			return 0xFF8A6A46;
-		}
-		if (id.contains("brick") || id.contains("stone") || id.contains("cobblestone") || id.contains("deepslate")) {
-			return 0xFF8E8A84;
-		}
-		if (id.contains("leaves") || id.contains("moss")) {
-			return 0xFF5E7F51;
-		}
-		if (id.contains("dirt") || id.contains("mud") || id.contains("farmland")) {
-			return 0xFF8D6A48;
-		}
-		if (id.contains("grass")) {
-			return 0xFF6E8B4A;
-		}
-		return 0xFFB8AA8E;
+		return switch (kind) {
+			case SAMPLE_WATER -> 0xFF5A84B7;
+			case SAMPLE_PATH -> 0xFFC2A368;
+			case SAMPLE_CROP -> 0xFF79A93A;
+			case SAMPLE_SAND -> 0xFFD9C38F;
+			case SAMPLE_STONE -> 0xFF8C8C8A;
+			case SAMPLE_WOOD -> 0xFF8B6A3C;
+			case SAMPLE_FOLIAGE -> 0xFF587D43;
+			default -> {
+				if (id.contains("dirt") || id.contains("mud") || id.contains("farmland")) {
+					yield 0xFF8D6A48;
+				}
+				if (id.contains("grass")) {
+					yield 0xFF7DA63C;
+				}
+				yield 0xFFB8AA8E;
+			}
+		};
+	}
+
+	private int tintBlockColor(int color, byte kind) {
+		return switch (kind) {
+			case SAMPLE_PATH -> blendColor(color, 0xFFC8A86A, 0.45F);
+			case SAMPLE_WOOD -> blendColor(color, 0xFF8B6738, 0.35F);
+			case SAMPLE_STONE -> blendColor(color, 0xFF888B90, 0.30F);
+			case SAMPLE_WATER -> blendColor(color, 0xFF5A82B4, 0.35F);
+			case SAMPLE_SAND -> blendColor(color, 0xFFD7C08A, 0.30F);
+			case SAMPLE_FOLIAGE -> blendColor(color, 0xFF5E8940, 0.25F);
+			case SAMPLE_CROP -> blendColor(color, 0xFF7DAE37, 0.35F);
+			default -> blendColor(color, 0xFF84B13C, 0.08F);
+		};
+	}
+
+	private int blendColor(int color, int overlay, float amount) {
+		int alpha = (color >>> 24) & 0xFF;
+		int red = (color >>> 16) & 0xFF;
+		int green = (color >>> 8) & 0xFF;
+		int blue = color & 0xFF;
+		int overlayRed = (overlay >>> 16) & 0xFF;
+		int overlayGreen = (overlay >>> 8) & 0xFF;
+		int overlayBlue = overlay & 0xFF;
+		red = MathHelper.clamp(Math.round(MathHelper.lerp(amount, red, overlayRed)), 0, 255);
+		green = MathHelper.clamp(Math.round(MathHelper.lerp(amount, green, overlayGreen)), 0, 255);
+		blue = MathHelper.clamp(Math.round(MathHelper.lerp(amount, blue, overlayBlue)), 0, 255);
+		return (alpha << 24) | (red << 16) | (green << 8) | blue;
 	}
 
 	private int shadeColor(int color, float factor) {
@@ -1026,5 +1127,8 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private record Marker(int defenderIndex, int centerX, int centerY, int radius) {
+	}
+
+	private record MapSample(int color, byte kind) {
 	}
 }
