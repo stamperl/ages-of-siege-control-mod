@@ -23,8 +23,12 @@ import java.util.UUID;
 
 public final class DefenderRuntimeService {
 	private static final double ARCHER_POST_RADIUS = 1.1D;
+	private static final double ARCHER_MAX_DROP = 1.0D;
+	private static final double ARCHER_BARRIER_PUSH = 0.18D;
+	private static final double ARCHER_BARRIER_LIFT = 0.28D;
+	private static final double ARCHER_RECOVERY_TELEPORT_DROP = 4.0D;
 	private static final double SOLDIER_POST_RADIUS = 1.5D;
-	private static final double SOLDIER_AGGRO_RADIUS = 12.0D;
+	private static final double SOLDIER_AGGRO_RADIUS = 20.0D;
 
 	private DefenderRuntimeService() {
 	}
@@ -38,6 +42,7 @@ public final class DefenderRuntimeService {
 		boolean siegeActive = state.isSiegeActive();
 		Set<UUID> validSiegeTargets = collectValidSiegeTargets(state);
 		Set<UUID> breacherTargets = collectBreacherTargets(state);
+		Set<UUID> ramTargets = collectRamTargets(state);
 		Set<UUID> staleDefenders = new HashSet<>();
 		for (PlacedDefender defender : state.getPlacedDefenders()) {
 			ServerWorld world = server.getWorld(resolveWorldKey(defender.dimensionId()));
@@ -51,7 +56,7 @@ public final class DefenderRuntimeService {
 			if (!(world.getEntity(defender.entityUuid()) instanceof MobEntity mob)) {
 				continue;
 			}
-			enforcePost(world, mob, defender, siegeActive, validSiegeTargets, breacherTargets);
+			enforcePost(world, mob, defender, siegeActive, validSiegeTargets, breacherTargets, ramTargets);
 		}
 		for (UUID defenderId : staleDefenders) {
 			state.removePlacedDefender(defenderId);
@@ -81,10 +86,11 @@ public final class DefenderRuntimeService {
 		PlacedDefender defender,
 		boolean siegeActive,
 		Set<UUID> validSiegeTargets,
-		Set<UUID> breacherTargets
+		Set<UUID> breacherTargets,
+		Set<UUID> ramTargets
 	) {
 		if (!defender.role().isRanged()) {
-			enforceSoldierPost(world, mob, defender, siegeActive, validSiegeTargets, breacherTargets);
+			enforceSoldierPost(world, mob, defender, siegeActive, validSiegeTargets, breacherTargets, ramTargets);
 			return;
 		}
 
@@ -99,6 +105,9 @@ public final class DefenderRuntimeService {
 			return;
 		}
 		applySiegeGuardState(mob);
+		if (applyArcherFallBarrier(mob, homeX, homeY, homeZ, defender.homeYaw())) {
+			return;
+		}
 		double maxDistance = ARCHER_POST_RADIUS;
 		mob.setAiDisabled(false);
 		if (distanceSq <= maxDistance * maxDistance) {
@@ -138,7 +147,7 @@ public final class DefenderRuntimeService {
 		if (!defender.role().isRanged()) {
 			if (distanceSq <= allowedDistance * allowedDistance) {
 				mob.setAiDisabled(true);
-				lockDefenderToPost(mob, defender.homeYaw());
+				snapDefenderToPost(mob, homeX, homeY, homeZ, defender.homeYaw());
 				return;
 			}
 			mob.setAiDisabled(false);
@@ -146,6 +155,9 @@ public final class DefenderRuntimeService {
 			return;
 		}
 		mob.setAiDisabled(true);
+		if (applyArcherFallBarrier(mob, homeX, homeY, homeZ, defender.homeYaw())) {
+			return;
+		}
 		if (distanceSq > allowedDistance * allowedDistance) {
 			mob.teleport(homeX, homeY, homeZ);
 		}
@@ -171,12 +183,42 @@ public final class DefenderRuntimeService {
 		mob.setHeadYaw(yaw);
 	}
 
+	private static void snapDefenderToPost(MobEntity mob, double homeX, double homeY, double homeZ, float yaw) {
+		mob.refreshPositionAndAngles(homeX, homeY, homeZ, yaw, mob.getPitch());
+		lockDefenderToPost(mob, yaw);
+	}
+
+	private static boolean applyArcherFallBarrier(MobEntity mob, double homeX, double homeY, double homeZ, float yaw) {
+		double drop = homeY - mob.getY();
+		if (drop <= ARCHER_MAX_DROP) {
+			return false;
+		}
+		if (drop >= ARCHER_RECOVERY_TELEPORT_DROP) {
+			snapDefenderToPost(mob, homeX, homeY, homeZ, yaw);
+			return true;
+		}
+
+		Vec3d towardHome = new Vec3d(homeX - mob.getX(), 0.0D, homeZ - mob.getZ());
+		Vec3d horizontalPush = towardHome.lengthSquared() > 0.0001D
+			? towardHome.normalize().multiply(ARCHER_BARRIER_PUSH)
+			: Vec3d.ZERO;
+		double upwardVelocity = Math.max(mob.getVelocity().y, ARCHER_BARRIER_LIFT);
+		mob.setTarget(null);
+		mob.getNavigation().stop();
+		mob.setVelocity(horizontalPush.x, upwardVelocity, horizontalPush.z);
+		mob.setYaw(yaw);
+		mob.setBodyYaw(yaw);
+		mob.setHeadYaw(yaw);
+		return true;
+	}
+
 	private static void updateSoldierTarget(
 		ServerWorld world,
 		MobEntity mob,
 		PlacedDefender defender,
 		Set<UUID> validSiegeTargets,
-		Set<UUID> breacherTargets
+		Set<UUID> breacherTargets,
+		Set<UUID> ramTargets
 	) {
 		LivingEntity currentTarget = mob.getTarget();
 		if (currentTarget != null && (!currentTarget.isAlive() || !validSiegeTargets.contains(currentTarget.getUuid()))) {
@@ -184,19 +226,17 @@ public final class DefenderRuntimeService {
 			currentTarget = null;
 		}
 
-		if (currentTarget != null) {
-			mob.setAiDisabled(false);
-			return;
-		}
-
-		LivingEntity nearbyTarget = findNearestSiegeTarget(world, defender, validSiegeTargets, breacherTargets);
-		if (nearbyTarget == null) {
+		TargetCandidate currentCandidate = evaluateTargetCandidate(currentTarget, defender, breacherTargets, ramTargets);
+		TargetCandidate bestCandidate = findPrioritySiegeTarget(world, defender, validSiegeTargets, breacherTargets, ramTargets);
+		if (currentCandidate == null && bestCandidate == null) {
 			clearTargetAndStop(mob);
 			return;
 		}
 
 		mob.setAiDisabled(false);
-		mob.setTarget(nearbyTarget);
+		if (isHigherPriority(bestCandidate, currentCandidate)) {
+			mob.setTarget(bestCandidate.entity());
+		}
 	}
 
 	private static void enforceSoldierPost(
@@ -205,7 +245,8 @@ public final class DefenderRuntimeService {
 		PlacedDefender defender,
 		boolean siegeActive,
 		Set<UUID> validSiegeTargets,
-		Set<UUID> breacherTargets
+		Set<UUID> breacherTargets,
+		Set<UUID> ramTargets
 	) {
 		BlockPos homePost = defender.homePost();
 		double homeX = homePost.getX() + 0.5D;
@@ -219,12 +260,12 @@ public final class DefenderRuntimeService {
 		}
 		applySiegeGuardState(mob);
 
-		updateSoldierTarget(world, mob, defender, validSiegeTargets, breacherTargets);
+		updateSoldierTarget(world, mob, defender, validSiegeTargets, breacherTargets, ramTargets);
 		LivingEntity target = mob.getTarget();
 		if (target == null) {
 			if (distanceSq <= SOLDIER_POST_RADIUS * SOLDIER_POST_RADIUS) {
 				mob.setAiDisabled(true);
-				lockDefenderToPost(mob, defender.homeYaw());
+				snapDefenderToPost(mob, homeX, homeY, homeZ, defender.homeYaw());
 				return;
 			}
 			mob.setAiDisabled(false);
@@ -239,17 +280,19 @@ public final class DefenderRuntimeService {
 		}
 	}
 
-	private static LivingEntity findNearestSiegeTarget(
+	private static TargetCandidate findPrioritySiegeTarget(
 		ServerWorld world,
 		PlacedDefender defender,
 		Set<UUID> validSiegeTargets,
-		Set<UUID> breacherTargets
+		Set<UUID> breacherTargets,
+		Set<UUID> ramTargets
 	) {
 		BlockPos homePost = defender.homePost();
 		double searchRadius = defender.role().isRanged()
 			? Math.max(3.0D, defender.leashRadius() + 2.0D)
 			: SOLDIER_AGGRO_RADIUS;
 		Vec3d center = Vec3d.ofCenter(homePost);
+		Vec3d priorityAnchor = Vec3d.ofCenter(defender.settlementBannerPos() != null ? defender.settlementBannerPos() : homePost);
 		Box searchBox = new Box(
 			center.x - searchRadius,
 			center.y - searchRadius,
@@ -259,23 +302,68 @@ public final class DefenderRuntimeService {
 			center.z + searchRadius
 		);
 
-		LivingEntity nearest = null;
-		LivingEntity nearestBreacher = null;
-		double nearestDistanceSq = Double.MAX_VALUE;
-		double nearestBreacherDistanceSq = Double.MAX_VALUE;
+		TargetCandidate bestCandidate = null;
 		for (LivingEntity entity : world.getEntitiesByClass(LivingEntity.class, searchBox, candidate ->
 			candidate.isAlive() && validSiegeTargets.contains(candidate.getUuid()))) {
-			double distanceSq = entity.squaredDistanceTo(center);
-			if (breacherTargets.contains(entity.getUuid()) && distanceSq < nearestBreacherDistanceSq) {
-				nearestBreacherDistanceSq = distanceSq;
-				nearestBreacher = entity;
-			}
-			if (distanceSq < nearestDistanceSq) {
-				nearestDistanceSq = distanceSq;
-				nearest = entity;
+			TargetCandidate candidate = new TargetCandidate(
+				entity,
+				getTargetPriority(entity.getUuid(), breacherTargets, ramTargets),
+				entity.squaredDistanceTo(priorityAnchor),
+				entity.squaredDistanceTo(center)
+			);
+			if (isHigherPriority(candidate, bestCandidate)) {
+				bestCandidate = candidate;
 			}
 		}
-		return nearestBreacher != null ? nearestBreacher : nearest;
+		return bestCandidate;
+	}
+
+	private static TargetCandidate evaluateTargetCandidate(
+		LivingEntity entity,
+		PlacedDefender defender,
+		Set<UUID> breacherTargets,
+		Set<UUID> ramTargets
+	) {
+		if (entity == null || !entity.isAlive()) {
+			return null;
+		}
+		Vec3d priorityAnchor = Vec3d.ofCenter(defender.settlementBannerPos() != null ? defender.settlementBannerPos() : defender.homePost());
+		Vec3d center = Vec3d.ofCenter(defender.homePost());
+		return new TargetCandidate(
+			entity,
+			getTargetPriority(entity.getUuid(), breacherTargets, ramTargets),
+			entity.squaredDistanceTo(priorityAnchor),
+			entity.squaredDistanceTo(center)
+		);
+	}
+
+	private static boolean isHigherPriority(TargetCandidate candidate, TargetCandidate currentBest) {
+		if (candidate == null) {
+			return false;
+		}
+		if (currentBest == null) {
+			return true;
+		}
+		if (candidate.priority() != currentBest.priority()) {
+			return candidate.priority() < currentBest.priority();
+		}
+		if (candidate.anchorDistanceSq() != currentBest.anchorDistanceSq()) {
+			return candidate.anchorDistanceSq() < currentBest.anchorDistanceSq();
+		}
+		if (candidate.defenderDistanceSq() != currentBest.defenderDistanceSq()) {
+			return candidate.defenderDistanceSq() < currentBest.defenderDistanceSq();
+		}
+		return false;
+	}
+
+	private static int getTargetPriority(UUID entityId, Set<UUID> breacherTargets, Set<UUID> ramTargets) {
+		if (breacherTargets.contains(entityId)) {
+			return 0;
+		}
+		if (ramTargets.contains(entityId)) {
+			return 1;
+		}
+		return 2;
 	}
 
 	private static Set<UUID> collectValidSiegeTargets(SiegeBaseState state) {
@@ -297,5 +385,12 @@ public final class DefenderRuntimeService {
 			}
 		});
 		return targets;
+	}
+
+	private static Set<UUID> collectRamTargets(SiegeBaseState state) {
+		return new HashSet<>(state.getRamIds());
+	}
+
+	private record TargetCandidate(LivingEntity entity, int priority, double anchorDistanceSq, double defenderDistanceSq) {
 	}
 }
