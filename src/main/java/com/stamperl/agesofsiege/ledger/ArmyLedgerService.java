@@ -123,7 +123,7 @@ public final class ArmyLedgerService {
 			&& rallyPresent
 			&& state.getActiveSession() == null
 			&& selectedSiege != null
-			&& selectedSiege.isUnlocked(state.getCompletedSieges());
+			&& selectedSiege.isUnlocked(state);
 		String siegeStatus = buildSiegeStatus(state, selectedSiege, siegeLocked, objectivePresent, rallyPresent);
 		return new ArmyLedgerSnapshot(
 			state.hasBase(),
@@ -138,6 +138,8 @@ public final class ArmyLedgerService {
 			state.getAgeLevel(),
 			state.getAgeName(),
 			state.getCompletedSieges(),
+			state.getCurrentAgeRegularWins(),
+			state.getRegularWinsPerAge(),
 			state.getNextAgeSiegeRequirement(),
 			selectedSiege == null ? "" : selectedSiege.id(),
 			siegeLocked,
@@ -186,11 +188,14 @@ public final class ArmyLedgerService {
 				definition.displayName(),
 				definition.description(),
 				definition.ageLevel(),
-				definition.unlockVictories(),
+				definition.requiredRegularWins(),
 				definition.waveSize(),
-				definition.isUnlocked(state.getCompletedSieges()),
-				definition.ageLevel() < state.getAgeLevel(),
+				definition.ageDefining(),
+				definition.isUnlocked(state),
+				definition.isReplay(state),
 				definition.hasRam(),
+				definition.routeColumn(),
+				definition.routeRow(),
 				definition.enemySummary(),
 				definition.weaponSummary(),
 				definition.threatSummary(),
@@ -225,11 +230,17 @@ public final class ArmyLedgerService {
 		if (selectedSiege == null) {
 			return "No siege operation is currently selected.";
 		}
-		if (!selectedSiege.isUnlocked(state.getCompletedSieges())) {
-			return "That siege unlocks after " + selectedSiege.unlockVictories() + " total victories.";
+		if (!selectedSiege.isUnlocked(state)) {
+			if (selectedSiege.ageLevel() > state.getAgeLevel()) {
+				return "Clear the current age siege to unlock the next age route.";
+			}
+			if (selectedSiege.ageDefining()) {
+				return "Win " + selectedSiege.requiredRegularWins() + " regular sieges in this age to unlock the age siege.";
+			}
+			return "That siege is not unlocked yet.";
 		}
-		if (selectedSiege.ageLevel() < state.getAgeLevel()) {
-			return "Replay selected. Rewards still drop, but settlement age progress will not advance.";
+		if (selectedSiege.isReplay(state)) {
+			return "Replay selected. Rewards still drop, but age progress will not advance.";
 		}
 		return "Select Lock Siege when your defenses are in place.";
 	}
@@ -239,7 +250,7 @@ public final class ArmyLedgerService {
 		if (selected != null) {
 			return selected;
 		}
-		return SiegeCatalog.highestUnlocked(state.getCompletedSieges());
+		return SiegeCatalog.highestUnlocked(state);
 	}
 
 	private static void lockSiege(ServerPlayerEntity player, String siegeId) {
@@ -252,7 +263,7 @@ public final class ArmyLedgerService {
 			player.sendMessage(Text.literal("That siege plan could not be found.").formatted(Formatting.RED), true);
 			return;
 		}
-		if (!definition.isUnlocked(state.getCompletedSieges())) {
+		if (!definition.isUnlocked(state)) {
 			player.sendMessage(Text.literal("That siege is not unlocked yet.").formatted(Formatting.RED), true);
 			return;
 		}

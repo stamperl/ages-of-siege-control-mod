@@ -1,5 +1,6 @@
 package com.stamperl.agesofsiege.state;
 
+import com.stamperl.agesofsiege.siege.SiegeCatalog;
 import com.stamperl.agesofsiege.siege.WallTier;
 import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
 import com.stamperl.agesofsiege.siege.runtime.SiegePlan;
@@ -34,7 +35,8 @@ import java.util.function.UnaryOperator;
 public class SiegeBaseState extends PersistentState {
 	private static final String STATE_KEY = "ages_of_siege_base";
 	private static final int MAX_OBJECTIVE_HEALTH = 30;
-	private static final int[] AGE_THRESHOLDS = {0, 1, 3, 6};
+	private static final int REGULAR_WINS_PER_AGE = 5;
+	private static final String DEFAULT_SIEGE_ID = "homestead_watch";
 	private static final String[] AGE_NAMES = {"Homestead", "Fortified", "Ironkeep", "Early Industry"};
 
 	private boolean hasBase;
@@ -43,10 +45,11 @@ public class SiegeBaseState extends PersistentState {
 	private String claimedBy = "unknown";
 	private int ageLevel;
 	private int completedSieges;
+	private int currentAgeRegularWins;
 	private boolean siegeFailed;
 	private BlockPos rallyPoint;
 	private BlockPos assaultOrigin;
-	private String selectedSiegeId = "homestead_raid";
+	private String selectedSiegeId = DEFAULT_SIEGE_ID;
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
 	private final Map<Long, Integer> wallHealth = new HashMap<>();
 	private final List<PlacedDefender> placedDefenders = new ArrayList<>();
@@ -74,6 +77,7 @@ public class SiegeBaseState extends PersistentState {
 		state.claimedBy = nbt.getString("claimedBy");
 		state.ageLevel = nbt.getInt("ageLevel");
 		state.completedSieges = nbt.getInt("completedSieges");
+		state.currentAgeRegularWins = nbt.contains("currentAgeRegularWins") ? nbt.getInt("currentAgeRegularWins") : 0;
 		state.siegeFailed = nbt.getBoolean("siegeFailed");
 		if (nbt.contains("rallyPointX")) {
 			state.rallyPoint = new BlockPos(
@@ -89,7 +93,7 @@ public class SiegeBaseState extends PersistentState {
 				nbt.getInt("assaultOriginZ")
 			);
 		}
-		state.selectedSiegeId = nbt.contains("selectedSiegeId") ? nbt.getString("selectedSiegeId") : "homestead_raid";
+		state.selectedSiegeId = nbt.contains("selectedSiegeId") ? nbt.getString("selectedSiegeId") : DEFAULT_SIEGE_ID;
 		state.objectiveHealth = nbt.contains("objectiveHealth") ? nbt.getInt("objectiveHealth") : MAX_OBJECTIVE_HEALTH;
 		NbtList wallList = nbt.getList("wallHealth", NbtElement.COMPOUND_TYPE);
 		for (NbtElement element : wallList) {
@@ -420,12 +424,22 @@ public class SiegeBaseState extends PersistentState {
 		return completedSieges;
 	}
 
+	public int getCurrentAgeRegularWins() {
+		return currentAgeRegularWins;
+	}
+
+	public int getRegularWinsPerAge() {
+		return REGULAR_WINS_PER_AGE;
+	}
+
 	public void setTestingAgeLevel(int ageLevel) {
-		int clampedAge = MathHelper.clamp(ageLevel, 0, AGE_THRESHOLDS.length - 1);
+		int clampedAge = MathHelper.clamp(ageLevel, 0, AGE_NAMES.length - 1);
 		this.ageLevel = clampedAge;
-		this.completedSieges = AGE_THRESHOLDS[clampedAge];
+		this.completedSieges = clampedAge * (REGULAR_WINS_PER_AGE + 1);
+		this.currentAgeRegularWins = 0;
 		this.siegeFailed = false;
 		this.activeSession = null;
+		this.selectedSiegeId = SiegeCatalog.defaultSiegeForAge(clampedAge).id();
 		resetCompatRuntime();
 		markDirty();
 	}
@@ -435,11 +449,10 @@ public class SiegeBaseState extends PersistentState {
 	}
 
 	public int getNextAgeSiegeRequirement() {
-		int nextAge = ageLevel + 1;
-		if (nextAge >= AGE_THRESHOLDS.length) {
+		if (ageLevel >= AGE_NAMES.length - 1) {
 			return -1;
 		}
-		return AGE_THRESHOLDS[nextAge];
+		return REGULAR_WINS_PER_AGE;
 	}
 
 	public List<UUID> getAttackerIds() {
@@ -549,7 +562,7 @@ public class SiegeBaseState extends PersistentState {
 
 	public void prepareStagedSiege(MinecraftServer server, String siegeId, int siegeAgeLevel) {
 		this.siegeFailed = false;
-		this.selectedSiegeId = siegeId == null || siegeId.isBlank() ? "homestead_raid" : siegeId;
+		this.selectedSiegeId = siegeId == null || siegeId.isBlank() ? DEFAULT_SIEGE_ID : siegeId;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.wallHealth.clear();
 		resetCompatRuntime();
@@ -706,12 +719,27 @@ public class SiegeBaseState extends PersistentState {
 		this.assaultOrigin = null;
 		this.activeSession = null;
 		resetCompatRuntime();
-		if (rewardProgress && !failed) {
-			this.completedSieges++;
-			this.ageLevel = resolveAgeLevel(this.completedSieges);
-		}
 		this.wallHealth.clear();
 		markDirty();
+	}
+
+	public boolean recordSiegeVictory(SiegeCatalog.SiegeDefinition definition) {
+		this.completedSieges++;
+		boolean advancedAge = false;
+		if (definition != null && definition.ageLevel() == this.ageLevel) {
+			if (definition.ageDefining()) {
+				if (this.currentAgeRegularWins >= REGULAR_WINS_PER_AGE && this.ageLevel < AGE_NAMES.length - 1) {
+					this.ageLevel++;
+					this.currentAgeRegularWins = 0;
+					this.selectedSiegeId = SiegeCatalog.defaultSiegeForAge(this.ageLevel).id();
+					advancedAge = true;
+				}
+			} else {
+				this.currentAgeRegularWins = Math.min(REGULAR_WINS_PER_AGE, this.currentAgeRegularWins + 1);
+			}
+		}
+		markDirty();
+		return advancedAge;
 	}
 
 	public String getSelectedSiegeId() {
@@ -719,7 +747,7 @@ public class SiegeBaseState extends PersistentState {
 	}
 
 	public void setSelectedSiegeId(String selectedSiegeId) {
-		String next = selectedSiegeId == null || selectedSiegeId.isBlank() ? "homestead_raid" : selectedSiegeId;
+		String next = selectedSiegeId == null || selectedSiegeId.isBlank() ? DEFAULT_SIEGE_ID : selectedSiegeId;
 		if (next.equals(this.selectedSiegeId)) {
 			return;
 		}
@@ -789,6 +817,7 @@ public class SiegeBaseState extends PersistentState {
 		nbt.putString("claimedBy", claimedBy);
 		nbt.putInt("ageLevel", ageLevel);
 		nbt.putInt("completedSieges", completedSieges);
+		nbt.putInt("currentAgeRegularWins", currentAgeRegularWins);
 		nbt.putBoolean("siegeFailed", siegeFailed);
 		if (rallyPoint != null) {
 			nbt.putInt("rallyPointX", rallyPoint.getX());
@@ -800,7 +829,7 @@ public class SiegeBaseState extends PersistentState {
 			nbt.putInt("assaultOriginY", assaultOrigin.getY());
 			nbt.putInt("assaultOriginZ", assaultOrigin.getZ());
 		}
-		nbt.putString("selectedSiegeId", selectedSiegeId == null ? "homestead_raid" : selectedSiegeId);
+		nbt.putString("selectedSiegeId", selectedSiegeId == null ? DEFAULT_SIEGE_ID : selectedSiegeId);
 		nbt.putInt("objectiveHealth", objectiveHealth);
 		if (activeSession != null) {
 			nbt.put("activeSession", activeSession.toNbt());
@@ -860,16 +889,6 @@ public class SiegeBaseState extends PersistentState {
 		this.rushTicksCompat = 0;
 		this.deploymentHoldTicksCompat = 0;
 		this.breachedWallBlocksCompat = 0;
-	}
-
-	private static int resolveAgeLevel(int completedSieges) {
-		int resolved = 0;
-		for (int i = 0; i < AGE_THRESHOLDS.length; i++) {
-			if (completedSieges >= AGE_THRESHOLDS[i]) {
-				resolved = i;
-			}
-		}
-		return resolved;
 	}
 
 	public String getDimensionId() {

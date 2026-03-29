@@ -432,7 +432,7 @@ public class ArmyLedgerScreen extends Screen {
 		if (rect.height >= 52) {
 			String progress = snapshot.nextAgeRequirement() < 0
 				? snapshot.currentAgeName() + " age maxed"
-				: snapshot.completedSieges() + "/" + snapshot.nextAgeRequirement() + " victories to next age";
+				: snapshot.ageProgressWins() + "/" + snapshot.ageProgressTarget() + " regular wins to age siege";
 			drawTrimmed(context, progress, rect.x + 10, rect.y + 46, rect.width - 20, TEXT_MUTED);
 		}
 	}
@@ -669,19 +669,19 @@ public class ArmyLedgerScreen extends Screen {
 			context.getMatrices().scale(campaignRouteZoom, campaignRouteZoom, 1.0F);
 			context.getMatrices().translate(campaignRoutePanX, campaignRoutePanY, 0.0F);
 			drawCampaignRouteBackdrop(context, 0, 0, campaignRouteCanvasWidth(), campaignRouteCanvasHeight());
-			drawSiegeProgressTree(context, 18, 10, campaignRouteCanvasWidth() - 36, getSelectedSiege());
+			drawSiegeProgressTree(context, 24, 22, campaignRouteCanvasWidth() - 48, getSelectedSiege());
 			context.getMatrices().pop();
 			context.disableScissor();
 			ArmyLedgerSnapshot.SiegeEntry siege = getSelectedSiege();
 			if (siege != null) {
-				int footerY = routeViewport.bottom() - 30;
+				int footerY = routeViewport.bottom() - 36;
 				context.fill(routeViewport.x + 10, footerY, routeViewport.right() - 10, routeViewport.bottom() - 10, 0x28140F0A);
 				context.fill(routeViewport.x + 10, footerY, routeViewport.right() - 10, footerY + 1, CARD_BORDER);
-				drawTrimmed(context, siege.name(), routeViewport.x + 18, footerY + 6, routeViewport.width - 184, TEXT_PRIMARY);
-				String routeLabel = siege.unlocked()
-					? (siege.replay() ? "Completed route unlocked for reward runs" : "Ready to deploy")
-					: snapshot.completedSieges() + "/" + siege.unlockVictories() + " victories to unlock";
-				drawTrimmed(context, routeLabel, routeViewport.x + 18, footerY + 18, routeViewport.width - 184, siege.unlocked() ? TEXT_WARM : TEXT_MUTED);
+				drawTrimmed(context, siege.name(), routeViewport.x + 18, footerY + 6, routeViewport.width - 196, TEXT_PRIMARY);
+				String routeLabel = siege.ageDefining()
+					? snapshot.ageProgressWins() + "/" + snapshot.ageProgressTarget() + " regular wins toward age siege"
+					: "Regular siege clears scale this age toward the boss route.";
+				drawTrimmed(context, routeLabel, routeViewport.x + 18, footerY + 20, routeViewport.width - 196, siege.unlocked() ? TEXT_WARM : TEXT_MUTED);
 				drawChip(context, routeViewport.right() - 144, footerY + 6, 56, "Age " + ageShortLabel(siege.ageLevel()), siegeAccentColor(siege), TEXT_PRIMARY);
 				drawChip(context, routeViewport.right() - 82, footerY + 6, 62, "+" + siege.warSuppliesReward() + " sup", 0x30546B43, TEXT_PRIMARY);
 			}
@@ -754,7 +754,6 @@ public class ArmyLedgerScreen extends Screen {
 		SiegeDetailLayout detailLayout = createSiegeDetailLayout(layout);
 		Rect titleCard = offsetRect(detailLayout.titleCard(), -scrollOffset);
 		Rect overviewCard = offsetRect(detailLayout.overviewCard(), -scrollOffset);
-		Rect campaignCard = offsetRect(detailLayout.campaignCard(), -scrollOffset);
 		Rect actionsCard = offsetRect(detailLayout.actionsCard(), -scrollOffset);
 
 		context.enableScissor(body.x, body.y, body.right(), body.bottom());
@@ -766,8 +765,10 @@ public class ArmyLedgerScreen extends Screen {
 
 		drawTrimmed(context, siege.name(), titleCard.x + 14, titleCard.y + 12, titleCard.width - 136, TEXT_PRIMARY);
 		String titleStatus = siege.unlocked()
-			? (siege.replay() ? "Completed route  •  replayable for rewards" : "Progress operation")
-			: "Locked until " + siege.unlockVictories() + " victories";
+			? (siege.replay() ? "Completed route - replayable for rewards" : (siege.ageDefining() ? "Age-defining boss siege" : "Progress operation"))
+			: siege.ageDefining()
+				? "Locked until " + snapshot.ageProgressTarget() + " regular wins in this age"
+				: "Locked until the current age route opens";
 		drawScaledText(context, titleStatus, titleCard.x + 14, titleCard.y + 36, siege.unlocked() ? TEXT_WARM : TEXT_MUTED, metaScale(layout.density));
 		drawChip(context, titleCard.right() - 132, titleCard.y + 12, 60, "Age " + ageShortLabel(siege.ageLevel()), accent, TEXT_PRIMARY);
 		drawChip(context, titleCard.right() - 66, titleCard.y + 12, 54, siege.waveSize() + " wave", 0x2E2E485A, TEXT_PRIMARY);
@@ -782,58 +783,6 @@ public class ArmyLedgerScreen extends Screen {
 		rowY = drawStatRow(context, overviewCard.x + 12, rowY, "Enemies", siege.enemySummary(), overviewCard.width - 24);
 		rowY = drawStatRow(context, overviewCard.x + 12, rowY, "Weapons", siege.weaponSummary(), overviewCard.width - 24);
 		drawStatRow(context, overviewCard.x + 12, rowY, "Threat", siege.threatSummary(), overviewCard.width - 24);
-
-		if (false && ledgerMode == LedgerMode.SIEGES) {
-			int campaignY = campaignCard.y + 12;
-			drawScaledText(context, "Campaign Status", campaignCard.x + 12, campaignY, TEXT_SECONDARY, metaScale(layout.density));
-			drawTrimmed(context, snapshot.currentAgeName() + " age", campaignCard.x + 12, campaignY + 16, campaignCard.width - 24, TEXT_PRIMARY);
-			drawTrimmed(context, snapshot.completedSieges() + " total victories", campaignCard.x + 12, campaignY + 34, campaignCard.width - 24, TEXT_SECONDARY);
-			drawWrapped(context, selectedSiegeStatus(siege), campaignCard.x + 12, campaignY + 54, campaignCard.width - 24, TEXT_MUTED, 2);
-			drawProgressBar(
-				context,
-				campaignCard.x + 12,
-				campaignCard.bottom() - 22,
-				campaignCard.width - 24,
-				8,
-				Math.min(snapshot.completedSieges(), Math.max(1, siege.unlockVictories())),
-				Math.max(1, siege.unlockVictories()),
-				accent,
-				0x2236414B
-			);
-		} else {
-		int campaignY = campaignCard.y + 12;
-		drawScaledText(context, "Age Route", campaignCard.x + 12, campaignY, TEXT_SECONDARY, metaScale(layout.density));
-		drawScaledText(context, "Drag to pan  •  Wheel to zoom", campaignCard.right() - 162, campaignY + 1, TEXT_MUTED, 0.72F);
-		Rect routeViewport = campaignRouteViewport(layout);
-		clampCampaignRoutePan(routeViewport);
-		context.enableScissor(routeViewport.x, routeViewport.y, routeViewport.right(), routeViewport.bottom());
-		context.getMatrices().push();
-		context.getMatrices().translate(routeViewport.x, routeViewport.y, 0.0F);
-		context.getMatrices().scale(campaignRouteZoom, campaignRouteZoom, 1.0F);
-		context.getMatrices().translate(campaignRoutePanX, campaignRoutePanY, 0.0F);
-		drawCampaignRouteBackdrop(context, 0, 0, campaignRouteCanvasWidth(), campaignRouteCanvasHeight());
-		drawSiegeProgressTree(context, 18, 10, campaignRouteCanvasWidth() - 36, siege);
-		context.getMatrices().pop();
-		context.disableScissor();
-		context.fill(campaignCard.x + 12, routeViewport.bottom() + 4, campaignCard.right() - 12, campaignCard.bottom() - 10, 0x28140F0A);
-		context.fill(campaignCard.x + 12, routeViewport.bottom() + 4, campaignCard.right() - 12, routeViewport.bottom() + 5, CARD_BORDER);
-		drawProgressBar(
-			context,
-			campaignCard.x + 12,
-			routeViewport.bottom() + 10,
-			campaignCard.width - 24,
-			8,
-			Math.min(snapshot.completedSieges(), Math.max(1, siege.unlockVictories())),
-			Math.max(1, siege.unlockVictories()),
-			accent,
-			0x2236414B
-		);
-		String unlockLabel = siege.unlocked()
-			? (siege.replay() ? "Completed route unlocked for reward runs" : "Ready to deploy")
-			: snapshot.completedSieges() + "/" + siege.unlockVictories() + " victories to unlock";
-		drawTrimmed(context, unlockLabel, campaignCard.x + 12, routeViewport.bottom() + 20, campaignCard.width - 24, siege.unlocked() ? TEXT_WARM : TEXT_MUTED);
-
-		}
 
 		int actionY = actionsCard.y + 12;
 		drawScaledText(context, "Command Post", actionsCard.x + 12, actionY, TEXT_SECONDARY, metaScale(layout.density));
@@ -977,63 +926,109 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private void drawSiegeProgressTree(DrawContext context, int x, int y, int width, ArmyLedgerSnapshot.SiegeEntry selectedSiege) {
-		int stageCount = 4;
-		int nodeWidth = Math.max(46, Math.min(64, (width - 72) / stageCount));
-		int nodeHeight = 20;
-		int step = stageCount <= 1 ? 0 : Math.max(56, (width - nodeWidth) / (stageCount - 1));
-		int[] nodeYs = new int[] {y + 20, y + 6, y + 28, y + 12};
-		int selectedAge = selectedSiege == null ? snapshot.currentAgeLevel() : selectedSiege.ageLevel();
-		for (int i = 0; i < stageCount - 1; i++) {
-			int startX = x + Math.min(width - nodeWidth, i * step) + nodeWidth;
-			int endX = x + Math.min(width - nodeWidth, (i + 1) * step);
-			int startMidY = nodeYs[i] + (nodeHeight / 2);
-			int endMidY = nodeYs[i + 1] + (nodeHeight / 2);
-			int threshold = ageUnlockThreshold(i + 1);
-			int deltaWins = Math.max(1, threshold - ageUnlockThreshold(i));
-			boolean unlocked = snapshot.currentAgeLevel() >= i + 1;
-			drawTreeConnector(context, startX, startMidY, endX, endMidY, unlocked ? TEXT_WARM : CARD_BORDER);
-			int labelX = startX + Math.max(4, (endX - startX - 44) / 2);
-			int labelY = Math.min(startMidY, endMidY) - 10;
-			drawScaledText(context, deltaWins + " wins", labelX, labelY, unlocked ? TEXT_WARM : TEXT_MUTED, 0.72F);
-		}
-		for (int i = 0; i < stageCount; i++) {
-			int nodeX = x + Math.min(width - nodeWidth, i * step);
-			boolean reached = snapshot.currentAgeLevel() >= i;
-			boolean selected = i == selectedAge;
-			int replayCount = replayableSiegeCountForAge(i);
-			Rect nodeRect = routeNodeRect(i);
-			drawAgeStageNode(context, nodeRect.x, nodeRect.y, nodeRect.width, nodeRect.height, i, reached, selected);
-			if (replayCount > 0 && reached) {
-				int replayY = nodeRect.y + nodeRect.height + 8;
-				context.fill(nodeRect.x + 8, replayY, nodeRect.x + nodeRect.width - 8, replayY + 14, 0x20394A36);
-				context.drawBorder(nodeRect.x + 8, replayY, nodeRect.width - 16, 14, CARD_BORDER);
-				drawScaledText(context, replayCount + " replay", nodeRect.x + 12, replayY + 4, TEXT_SECONDARY, 0.72F);
+		for (int age = 0; age <= 3; age++) {
+			final int routeAge = age;
+			List<ArmyLedgerSnapshot.SiegeEntry> ageSieges = snapshot.sieges().stream()
+				.filter(siege -> siege.ageLevel() == routeAge)
+				.sorted(Comparator.comparingInt(ArmyLedgerSnapshot.SiegeEntry::routeColumn))
+				.toList();
+			if (ageSieges.isEmpty()) {
+				continue;
+			}
+
+			Rect previousRect = null;
+			Rect bossRect = null;
+			for (ArmyLedgerSnapshot.SiegeEntry siege : ageSieges) {
+				Rect nodeRect = routeNodeRect(siege);
+				if (previousRect != null) {
+					drawTreeConnector(context, previousRect.right(), previousRect.centerY(), nodeRect.x, nodeRect.centerY(), connectorColorFor(siege));
+				}
+				if (siege.ageDefining()) {
+					bossRect = nodeRect;
+				} else if (previousRect != null) {
+					drawRegularWinPips(context, previousRect, nodeRect, age, false);
+				}
+				previousRect = nodeRect;
+			}
+
+			if (bossRect != null && previousRect != null) {
+				drawRegularWinPips(context, new Rect(bossRect.x - 74, bossRect.y, 56, bossRect.height), bossRect, age, true);
+				int progressWins = age < snapshot.currentAgeLevel()
+					? snapshot.ageProgressTarget()
+					: age == snapshot.currentAgeLevel() ? snapshot.ageProgressWins() : 0;
+				drawScaledText(context, progressWins + "/" + snapshot.ageProgressTarget() + " wins", bossRect.x - 8, bossRect.y - 16, connectorColorFor(ageSieges.get(ageSieges.size() - 1)), 0.72F);
+			}
+
+			if (age < 3) {
+				ArmyLedgerSnapshot.SiegeEntry nextAgeEntry = snapshot.sieges().stream()
+					.filter(siege -> siege.ageLevel() == routeAge + 1 && siege.routeColumn() == 0)
+					.findFirst()
+					.orElse(null);
+				if (nextAgeEntry != null && bossRect != null) {
+					Rect nextRect = routeNodeRect(nextAgeEntry);
+					drawTreeConnector(context, bossRect.right(), bossRect.centerY(), nextRect.x, nextRect.centerY(), connectorColorFor(nextAgeEntry));
+				}
 			}
 		}
+
+		for (int age = 0; age <= 3; age++) {
+			drawAgeColumnHeader(context, 38 + (age * 252), 20, age);
+		}
+
+		for (ArmyLedgerSnapshot.SiegeEntry siege : snapshot.sieges()) {
+			Rect nodeRect = routeNodeRect(siege);
+			boolean selected = selectedSiege != null && selectedSiege.id().equals(siege.id());
+			drawAgeStageNode(context, nodeRect.x, nodeRect.y, nodeRect.width, nodeRect.height, siege, selected);
+		}
 	}
 
-	private Rect routeNodeRect(int index) {
-		int stageCount = Math.max(1, snapshot.sieges().size());
-		int nodeWidth = Math.max(46, Math.min(64, (campaignRouteCanvasWidth() - 72) / stageCount));
-		int nodeHeight = 20;
-		int step = stageCount <= 1 ? 0 : Math.max(56, (campaignRouteCanvasWidth() - 36 - nodeWidth) / (stageCount - 1));
-		int[] nodeYs = new int[] {30, 16, 38, 22};
-		int nodeX = 18 + Math.min(campaignRouteCanvasWidth() - 36 - nodeWidth, index * step);
-		int nodeY = nodeYs[Math.min(index, nodeYs.length - 1)];
-		return new Rect(nodeX, nodeY, nodeWidth, nodeHeight);
+	private Rect routeNodeRect(ArmyLedgerSnapshot.SiegeEntry siege) {
+		int nodeWidth = siege.ageDefining() ? 132 : 108;
+		int nodeHeight = siege.ageDefining() ? 40 : 32;
+		int ageOffsetX = siege.ageLevel() * 252;
+		int x = 44 + ageOffsetX + (siege.routeColumn() * 64);
+		int y = siege.routeRow() == 0 ? 82 : 186;
+		return new Rect(x, y, nodeWidth, nodeHeight);
 	}
 
-	private void drawAgeStageNode(DrawContext context, int x, int y, int width, int height, int ageLevel, boolean reached, boolean selected) {
+	private void drawAgeStageNode(DrawContext context, int x, int y, int width, int height, ArmyLedgerSnapshot.SiegeEntry siege, boolean selected) {
+		boolean reached = siege.unlocked() || siege.replay();
 		int fill = reached ? 0xFF7C6224 : 0x24303840;
 		int innerFill = reached ? 0xFFD39F16 : 0x2A38414B;
+		if (siege.ageDefining()) {
+			fill = reached ? 0xFF7C3424 : 0x24303840;
+			innerFill = reached ? 0xFFD96B2A : 0x2A38414B;
+		}
 		int border = selected ? MARKER_SELECTED : (reached ? TEXT_WARM : CARD_BORDER);
 		context.fill(x, y, x + width, y + height, fill);
 		context.drawBorder(x, y, width, height, border);
 		context.fill(x + 2, y + 2, x + width - 2, y + height - 2, innerFill);
-		drawCenteredScaledText(context, ageLabel(ageLevel), x, y + 6, width, reached ? 0xFF1A1404 : TEXT_MUTED, 0.72F);
+		drawAgeGlyph(context, x + 8, y + 7, siege.ageLevel(), siege.ageDefining(), reached ? 0xFF1A1404 : TEXT_MUTED);
+		drawCenteredScaledText(context, siege.name(), x + 26, y + 8, width - 34, reached ? 0xFF1A1404 : TEXT_MUTED, siege.ageDefining() ? 0.84F : 0.76F);
+		drawCenteredScaledText(context, siege.ageDefining() ? "Age Siege" : "Skirmish", x + 24, y + height - 12, width - 28, reached ? 0xAA2A2110 : TEXT_MUTED, 0.68F);
 		if (selected) {
 			context.drawBorder(x - 2, y - 2, width + 4, height + 4, 0x805F7C90);
 		}
+	}
+
+	private void drawAgeColumnHeader(DrawContext context, int x, int y, int age) {
+		int width = 168;
+		int color = switch (age) {
+			case 0 -> 0x806B8A54;
+			case 1 -> 0x809A7848;
+			case 2 -> 0x80C96D5D;
+			default -> 0x80946DBE;
+		};
+		context.fill(x, y, x + width, y + 18, 0x24140F0A);
+		context.fill(x, y + 16, x + width, y + 18, color);
+		drawTrimmed(context, ageLabel(age) + " Age", x + 4, y + 4, width - 8, age <= snapshot.currentAgeLevel() ? TEXT_PRIMARY : TEXT_MUTED);
+	}
+
+	private int connectorColorFor(ArmyLedgerSnapshot.SiegeEntry siege) {
+		if (siege.replay()) {
+			return 0xFF8AA06B;
+		}
+		return siege.unlocked() ? TEXT_WARM : CARD_BORDER;
 	}
 
 	private void drawTreeConnector(DrawContext context, int startX, int startY, int endX, int endY, int color) {
@@ -1045,21 +1040,81 @@ public class ArmyLedgerScreen extends Screen {
 		context.fill(turnX, endY, endX, endY + 2, color);
 	}
 
-	private void drawCampaignRouteBackdrop(DrawContext context, int x, int y, int width, int height) {
-		context.fill(x, y, x + width, y + height, 0xFF473629);
-		context.fill(x + 4, y + 4, x + width - 4, y + height - 4, 0xFF8A724A);
-		for (int row = y + 6; row < y + height - 6; row += 18) {
-			for (int col = x + 6; col < x + width - 6; col += 18) {
-				int tile = ((row + col) / 18) % 2 == 0 ? 0x202B1D13 : 0x1423150D;
-				context.fill(col, row, Math.min(x + width - 6, col + 14), Math.min(y + height - 6, row + 14), tile);
+	private void drawRegularWinPips(DrawContext context, Rect startRect, Rect endRect, int age, boolean bossRoute) {
+		int totalWins = Math.max(1, snapshot.ageProgressTarget());
+		int filledWins = age < snapshot.currentAgeLevel()
+			? totalWins
+			: age == snapshot.currentAgeLevel() ? snapshot.ageProgressWins() : 0;
+		int startX = startRect.right() + 12;
+		int available = Math.max(20, endRect.x - startX - 10);
+		int spacing = Math.max(16, available / totalWins);
+		int centerY = Math.min(startRect.centerY(), endRect.centerY()) - (bossRoute ? 18 : 12);
+		for (int i = 0; i < totalWins; i++) {
+			drawWinPip(context, startX + (i * spacing), centerY, i < filledWins, bossRoute);
+		}
+		if (bossRoute) {
+			drawScaledText(context, totalWins + " wins to age siege", startX, centerY - 12, 0xCFE2C38E, 0.7F);
+		}
+	}
+
+	private void drawWinPip(DrawContext context, int x, int y, boolean filled, boolean bossRoute) {
+		int outer = filled ? 0xFF8C6B29 : 0x40323B42;
+		int inner = filled ? (bossRoute ? 0xFFD58C36 : 0xFFCFA85D) : 0x24303840;
+		context.fill(x, y, x + 10, y + 10, outer);
+		context.drawBorder(x, y, 10, 10, filled ? 0xFFDCC58C : CARD_BORDER);
+		context.fill(x + 2, y + 2, x + 8, y + 8, inner);
+		if (bossRoute && filled) {
+			context.fill(x + 4, y + 1, x + 6, y + 9, 0xFF2A1A08);
+		}
+	}
+
+	private void drawAgeGlyph(DrawContext context, int x, int y, int ageLevel, boolean boss, int color) {
+		switch (ageLevel) {
+			case 0 -> {
+				context.fill(x + 5, y + 1, x + 7, y + 10, color);
+				context.fill(x + 3, y + 4, x + 5, y + 9, color);
+				context.fill(x + 7, y + 4, x + 9, y + 9, color);
+				context.fill(x + 2, y + 8, x + 10, y + 10, color);
+			}
+			case 1 -> {
+				context.fill(x + 2, y + 2, x + 10, y + 4, color);
+				context.fill(x + 2, y + 8, x + 10, y + 10, color);
+				context.fill(x + 2, y + 4, x + 4, y + 8, color);
+				context.fill(x + 8, y + 4, x + 10, y + 8, color);
+				context.fill(x + 5, y + 5, x + 7, y + 8, color);
+			}
+			case 2 -> {
+				context.fill(x + 2, y + 2, x + 10, y + 4, color);
+				context.fill(x + 3, y + 4, x + 9, y + 7, color);
+				context.fill(x + 4, y + 7, x + 8, y + 10, color);
+			}
+			default -> {
+				context.fill(x + 1, y + 7, x + 11, y + 9, color);
+				context.fill(x + 4, y + 1, x + 6, y + 7, color);
+				context.fill(x + 7, y + 3, x + 9, y + 9, color);
+				context.fill(x + 8, y, x + 10, y + 3, color);
 			}
 		}
-		for (int beam = x + 10; beam < x + width - 8; beam += 44) {
-			context.fill(beam, y + 4, beam + 3, y + height - 4, 0x4029150D);
+		if (boss) {
+			context.fill(x + 10, y, x + 12, y + 2, MARKER_SELECTED);
+			context.fill(x + 8, y + 2, x + 10, y + 4, MARKER_SELECTED);
+			context.fill(x + 10, y + 4, x + 12, y + 6, MARKER_SELECTED);
 		}
-		for (int stud = x + 18; stud < x + width - 12; stud += 36) {
-			context.fill(stud, y + 10, stud + 4, y + 14, 0x80D7B56A);
-			context.fill(stud, y + height - 14, stud + 4, y + height - 10, 0x80D7B56A);
+	}
+
+	private void drawCampaignRouteBackdrop(DrawContext context, int x, int y, int width, int height) {
+		context.fill(x, y, x + width, y + height, 0xFF32261A);
+		context.fill(x + 4, y + 4, x + width - 4, y + height - 4, 0xFFC2A26E);
+		context.fill(x + 10, y + 10, x + width - 10, y + height - 10, 0xFFE0C58D);
+		for (int row = y + 18; row < y + height - 18; row += 30) {
+			context.fill(x + 14, row, x + width - 14, row + 1, 0x18A78349);
+		}
+		for (int col = x + 24; col < x + width - 24; col += 44) {
+			context.fill(col, y + 14, col + 1, y + height - 14, 0x1290673A);
+		}
+		for (int seal = x + 22; seal < x + width - 18; seal += 80) {
+			context.fill(seal, y + 18, seal + 4, y + 22, 0x70B78D48);
+			context.fill(seal, y + height - 22, seal + 4, y + height - 18, 0x70B78D48);
 		}
 		context.drawBorder(x, y, width, height, 0xB06A5433);
 	}
@@ -1077,11 +1132,11 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private int campaignRouteCanvasWidth() {
-		return 420;
+		return 1040;
 	}
 
 	private int campaignRouteCanvasHeight() {
-		return 150;
+		return 420;
 	}
 
 	private void clampCampaignRoutePan(Rect viewport) {
@@ -1138,7 +1193,7 @@ public class ArmyLedgerScreen extends Screen {
 		float localX = (float) ((mouseX - viewport.x) / Math.max(0.01F, campaignRouteZoom) - campaignRoutePanX);
 		float localY = (float) ((mouseY - viewport.y) / Math.max(0.01F, campaignRouteZoom) - campaignRoutePanY);
 		for (int i = 0; i < snapshot.sieges().size(); i++) {
-			if (contains(routeNodeRect(i), localX, localY)) {
+			if (contains(routeNodeRect(snapshot.sieges().get(i)), localX, localY)) {
 				return i;
 			}
 		}
@@ -1327,10 +1382,10 @@ public class ArmyLedgerScreen extends Screen {
 			detailPanel = new Rect(mapPanel.right() - detailWidth - 14, mapPanel.y + 14, detailWidth, detailHeight);
 		} else {
 			int detailWidth = switch (density) {
-				case WIDE -> MathHelper.clamp(frame.width / 3, 400, 480);
-				case NORMAL -> MathHelper.clamp(frame.width / 4, 320, 400);
+				case WIDE -> ledgerMode == LedgerMode.SIEGES ? MathHelper.clamp(frame.width / 4, 320, 380) : MathHelper.clamp(frame.width / 3, 400, 480);
+				case NORMAL -> ledgerMode == LedgerMode.SIEGES ? MathHelper.clamp(frame.width / 5, 280, 330) : MathHelper.clamp(frame.width / 4, 320, 400);
 				case COMPACT -> ledgerMode == LedgerMode.SIEGES
-					? MathHelper.clamp(frame.width / 4, 250, 300)
+					? MathHelper.clamp(frame.width / 5, 230, 270)
 					: MathHelper.clamp(frame.width / 4, 280, 340);
 			};
 			int mapWidth = frame.width - detailWidth - PANEL_GAP - (outerInset * 2);
@@ -1459,7 +1514,6 @@ public class ArmyLedgerScreen extends Screen {
 	private void selectSiege(int index) {
 		selectedSiegeIndex = MathHelper.clamp(index, 0, snapshot.sieges().size() - 1);
 		siegeDetailScroll = 0;
-		resetCampaignRouteView();
 		refreshControls();
 	}
 
@@ -1862,9 +1916,9 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private void resetCampaignRouteView() {
-		campaignRouteZoom = 1.0F;
+		campaignRouteZoom = 0.92F;
 		campaignRoutePanX = 0.0F;
-		campaignRoutePanY = 0.0F;
+		campaignRoutePanY = -10.0F;
 		campaignRouteDragging = false;
 	}
 
@@ -1901,10 +1955,16 @@ public class ArmyLedgerScreen extends Screen {
 			return "A siege is already active. Finish it before planning another.";
 		}
 		if (!siege.unlocked()) {
-			return "That siege unlocks after " + siege.unlockVictories() + " total victories.";
+			if (siege.ageDefining()) {
+				return "Win " + snapshot.ageProgressTarget() + " regular sieges in this age to unlock the age siege.";
+			}
+			if (siege.ageLevel() > snapshot.currentAgeLevel()) {
+				return "Clear the current age siege to unlock the next age route.";
+			}
+			return "That siege is not unlocked yet.";
 		}
 		if (siege.replay()) {
-			return "Completed route selected. Rewards still drop, but settlement age progress will not advance.";
+			return "Completed route selected. Rewards still drop, but age progress will not advance.";
 		}
 		return snapshot.siegeStatus();
 	}
@@ -1968,9 +2028,9 @@ public class ArmyLedgerScreen extends Screen {
 		int gap = layout.density == LayoutDensity.COMPACT ? 8 : 10;
 		if (layout.mode == LayoutMode.DRAWER) {
 			int titleHeight = 58;
-			int overviewHeight = 152;
+			int overviewHeight = 164;
 			int campaignHeight = 0;
-			int actionsHeight = 176;
+			int actionsHeight = 140;
 			Rect titleCard = new Rect(body.x, body.y, body.width, titleHeight);
 			Rect overviewCard = new Rect(body.x, titleCard.bottom() + gap, body.width, overviewHeight);
 			Rect campaignCard = new Rect(body.x, overviewCard.bottom() + gap, body.width, campaignHeight);
@@ -1979,8 +2039,8 @@ public class ArmyLedgerScreen extends Screen {
 		}
 		int titleHeight = 58;
 		int campaignHeight = 0;
-		int actionsHeight = 176;
-		int overviewHeight = Math.max(148, body.height - titleHeight - campaignHeight - actionsHeight - (gap * 3));
+		int actionsHeight = 138;
+		int overviewHeight = Math.max(180, body.height - titleHeight - campaignHeight - actionsHeight - (gap * 3));
 		Rect titleCard = new Rect(body.x, body.y, body.width, titleHeight);
 		Rect overviewCard = new Rect(body.x, titleCard.bottom() + gap, body.width, overviewHeight);
 		Rect campaignCard = new Rect(body.x, overviewCard.bottom() + gap, body.width, campaignHeight);

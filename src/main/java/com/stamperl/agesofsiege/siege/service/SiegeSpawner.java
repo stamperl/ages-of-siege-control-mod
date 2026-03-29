@@ -43,7 +43,7 @@ public final class SiegeSpawner {
 	}
 
 	public void spawnWave(MinecraftServer server, ServerWorld world, SiegeBaseState state, SiegeSession session, SiegeCatalog.SiegeDefinition definition) {
-		spawnWave(server, world, state, session, definition.ageLevel(), definition.waveSize());
+		spawnWave(server, world, state, session, definition.combatTier(), definition.waveSize());
 	}
 
 	private void spawnWave(MinecraftServer server, ServerWorld world, SiegeBaseState state, SiegeSession session, int siegeAgeLevel, int waveSize) {

@@ -46,8 +46,8 @@ public final class SiegeDirector {
 
 	public static boolean startSiege(MinecraftServer server, SiegeBaseState state) {
 		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.byId(state.getSelectedSiegeId());
-		if (definition == null || !definition.isUnlocked(state.getCompletedSieges())) {
-			definition = SiegeCatalog.highestUnlocked(state.getCompletedSieges());
+		if (definition == null || !definition.isUnlocked(state)) {
+			definition = SiegeCatalog.highestUnlocked(state);
 		}
 		if (!lockSiegeFromLedger(server, state, definition)) {
 			return false;
@@ -273,13 +273,17 @@ public final class SiegeDirector {
 		if (session.getAttackerIds().isEmpty() && session.getEngineIds().isEmpty()) {
 			int previousAge = state.getAgeLevel();
 			int siegeAgeLevel = session.getSessionAgeLevel();
-			boolean rewardProgress = siegeAgeLevel >= previousAge;
+			SiegeCatalog.SiegeDefinition definition = SiegeCatalog.byId(state.getSelectedSiegeId());
 			REWARDS.dropVictoryRewards(world, session, objectivePos, siegeAgeLevel, state.getSelectedSiegeId());
-			state.endSiege(false, rewardProgress);
-			server.getPlayerManager().broadcast(Text.literal(rewardProgress
-				? "The siege wave has been defeated."
-				: "Replay siege defeated. Settlement progress unchanged."), false);
-			if (rewardProgress && state.getAgeLevel() > previousAge) {
+			state.endSiege(false, false);
+			boolean advancedAge = state.recordSiegeVictory(definition);
+			boolean replay = definition != null && definition.isReplay(state);
+			server.getPlayerManager().broadcast(Text.literal(replay
+				? "Replay siege defeated. Rewards drop, but age progress is unchanged."
+				: (definition != null && definition.ageDefining()
+					? "Age siege defeated."
+					: "The siege wave has been defeated.")), false);
+			if (advancedAge && state.getAgeLevel() > previousAge) {
 				server.getPlayerManager().broadcast(Text.literal("Age advanced: " + state.getAgeName() + " unlocked."), false);
 			}
 		}

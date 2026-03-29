@@ -21,6 +21,8 @@ public record ArmyLedgerSnapshot(
 	int currentAgeLevel,
 	String currentAgeName,
 	int completedSieges,
+	int ageProgressWins,
+	int ageProgressTarget,
 	int nextAgeRequirement,
 	String selectedSiegeId,
 	boolean siegeLocked,
@@ -43,6 +45,8 @@ public record ArmyLedgerSnapshot(
 		buf.writeVarInt(currentAgeLevel);
 		buf.writeString(currentAgeName);
 		buf.writeVarInt(completedSieges);
+		buf.writeVarInt(ageProgressWins);
+		buf.writeVarInt(ageProgressTarget);
 		buf.writeVarInt(nextAgeRequirement);
 		buf.writeString(selectedSiegeId);
 		buf.writeBoolean(siegeLocked);
@@ -72,6 +76,8 @@ public record ArmyLedgerSnapshot(
 		int currentAgeLevel = buf.readVarInt();
 		String currentAgeName = buf.readString();
 		int completedSieges = buf.readVarInt();
+		int ageProgressWins = buf.readVarInt();
+		int ageProgressTarget = buf.readVarInt();
 		int nextAgeRequirement = buf.readVarInt();
 		String selectedSiegeId = buf.readString();
 		boolean siegeLocked = buf.readBoolean();
@@ -101,6 +107,8 @@ public record ArmyLedgerSnapshot(
 			currentAgeLevel,
 			currentAgeName,
 			completedSieges,
+			ageProgressWins,
+			ageProgressTarget,
 			nextAgeRequirement,
 			selectedSiegeId,
 			siegeLocked,
@@ -119,9 +127,12 @@ public record ArmyLedgerSnapshot(
 		int ageLevel,
 		int unlockVictories,
 		int waveSize,
+		boolean ageDefining,
 		boolean unlocked,
 		boolean replay,
 		boolean hasRam,
+		int routeColumn,
+		int routeRow,
 		String enemySummary,
 		String weaponSummary,
 		String threatSummary,
@@ -134,9 +145,12 @@ public record ArmyLedgerSnapshot(
 			buf.writeVarInt(ageLevel);
 			buf.writeVarInt(unlockVictories);
 			buf.writeVarInt(waveSize);
+			buf.writeBoolean(ageDefining);
 			buf.writeBoolean(unlocked);
 			buf.writeBoolean(replay);
 			buf.writeBoolean(hasRam);
+			buf.writeVarInt(routeColumn);
+			buf.writeVarInt(routeRow);
 			buf.writeString(enemySummary);
 			buf.writeString(weaponSummary);
 			buf.writeString(threatSummary);
@@ -154,6 +168,9 @@ public record ArmyLedgerSnapshot(
 				buf.readBoolean(),
 				buf.readBoolean(),
 				buf.readBoolean(),
+				buf.readBoolean(),
+				buf.readVarInt(),
+				buf.readVarInt(),
 				buf.readString(),
 				buf.readString(),
 				buf.readString(),
