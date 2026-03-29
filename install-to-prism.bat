@@ -31,8 +31,16 @@ set "TARGET=%~1"
 if not exist "%TARGET%" (
 	exit /b 0
 )
-copy /Y "%SOURCE%" "%TARGET%\ages-of-siege-control-0.1.0.jar" >nul
-powershell -NoProfile -Command "(Get-Item '%TARGET%\ages-of-siege-control-0.1.0.jar').LastWriteTime = Get-Date" >nul
+set "DEST=%TARGET%\ages-of-siege-control-0.1.0.jar"
+powershell -NoProfile -Command ^
+	"$ErrorActionPreference = 'Stop';" ^
+	"Copy-Item -LiteralPath '%SOURCE%' -Destination '%DEST%' -Force;" ^
+	"(Get-Item -LiteralPath '%DEST%').LastWriteTime = Get-Date" >nul
+if errorlevel 1 (
+	echo Failed to install into: %TARGET%
+	echo Close Minecraft/Prism for this instance and try again.
+	exit /b 1
+)
 set "COPIED_ANY=1"
 echo Installed into: %TARGET%
 exit /b 0
