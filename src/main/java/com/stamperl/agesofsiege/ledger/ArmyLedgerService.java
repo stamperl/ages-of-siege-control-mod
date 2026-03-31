@@ -182,7 +182,7 @@ public final class ArmyLedgerService {
 
 	private static List<ArmyLedgerSnapshot.SiegeEntry> buildSiegeEntries(SiegeBaseState state) {
 		List<ArmyLedgerSnapshot.SiegeEntry> sieges = new ArrayList<>();
-		for (SiegeCatalog.SiegeDefinition definition : SiegeCatalog.all()) {
+		for (SiegeCatalog.SiegeDefinition definition : SiegeCatalog.allForState(state)) {
 			sieges.add(new ArmyLedgerSnapshot.SiegeEntry(
 				definition.id(),
 				definition.displayName(),
@@ -246,11 +246,11 @@ public final class ArmyLedgerService {
 	}
 
 	private static SiegeCatalog.SiegeDefinition resolveSelectedSiege(SiegeBaseState state) {
-		SiegeCatalog.SiegeDefinition selected = SiegeCatalog.byId(state.getSelectedSiegeId());
+		SiegeCatalog.SiegeDefinition selected = SiegeCatalog.resolveForState(state, state.getSelectedSiegeId());
 		if (selected != null) {
 			return selected;
 		}
-		return SiegeCatalog.highestUnlocked(state);
+		return SiegeCatalog.resolveForState(state, SiegeCatalog.highestUnlocked(state).id());
 	}
 
 	private static void lockSiege(ServerPlayerEntity player, String siegeId) {
@@ -258,7 +258,7 @@ public final class ArmyLedgerService {
 		if (!canManageSieges(player, state)) {
 			return;
 		}
-		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.byId(siegeId);
+		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.resolveForState(state, siegeId);
 		if (definition == null) {
 			player.sendMessage(Text.literal("That siege plan could not be found.").formatted(Formatting.RED), true);
 			return;

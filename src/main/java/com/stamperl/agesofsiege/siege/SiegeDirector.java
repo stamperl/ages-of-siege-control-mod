@@ -45,9 +45,9 @@ public final class SiegeDirector {
 	}
 
 	public static boolean startSiege(MinecraftServer server, SiegeBaseState state) {
-		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.byId(state.getSelectedSiegeId());
+		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.resolveForState(state, state.getSelectedSiegeId());
 		if (definition == null || !definition.isUnlocked(state)) {
-			definition = SiegeCatalog.highestUnlocked(state);
+			definition = SiegeCatalog.resolveForState(state, SiegeCatalog.highestUnlocked(state).id());
 		}
 		if (!lockSiegeFromLedger(server, state, definition)) {
 			return false;
@@ -273,7 +273,7 @@ public final class SiegeDirector {
 		if (session.getAttackerIds().isEmpty() && session.getEngineIds().isEmpty()) {
 			int previousAge = state.getAgeLevel();
 			int siegeAgeLevel = session.getSessionAgeLevel();
-			SiegeCatalog.SiegeDefinition definition = SiegeCatalog.byId(state.getSelectedSiegeId());
+			SiegeCatalog.SiegeDefinition definition = SiegeCatalog.resolveForState(state, state.getSelectedSiegeId());
 			REWARDS.dropVictoryRewards(world, session, objectivePos, siegeAgeLevel, state.getSelectedSiegeId());
 			state.endSiege(false, false);
 			boolean advancedAge = state.recordSiegeVictory(definition);
