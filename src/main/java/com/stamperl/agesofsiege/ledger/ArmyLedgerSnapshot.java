@@ -130,7 +130,7 @@ public record ArmyLedgerSnapshot(
 		boolean ageDefining,
 		boolean unlocked,
 		boolean replay,
-		boolean hasRam,
+		int ramCount,
 		int routeColumn,
 		int routeRow,
 		String enemySummary,
@@ -148,7 +148,7 @@ public record ArmyLedgerSnapshot(
 			buf.writeBoolean(ageDefining);
 			buf.writeBoolean(unlocked);
 			buf.writeBoolean(replay);
-			buf.writeBoolean(hasRam);
+			buf.writeVarInt(ramCount);
 			buf.writeVarInt(routeColumn);
 			buf.writeVarInt(routeRow);
 			buf.writeString(enemySummary);
@@ -168,7 +168,7 @@ public record ArmyLedgerSnapshot(
 				buf.readBoolean(),
 				buf.readBoolean(),
 				buf.readBoolean(),
-				buf.readBoolean(),
+				buf.readVarInt(),
 				buf.readVarInt(),
 				buf.readVarInt(),
 				buf.readString(),

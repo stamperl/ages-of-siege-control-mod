@@ -44,6 +44,12 @@ public final class ModCommands {
 						context.getSource().getPlayerOrThrow(),
 						IntegerArgumentType.getInteger(context, "level")
 					))))
+			.then(CommandManager.literal("resetprogress")
+				.requires(source -> source.hasPermissionLevel(2))
+				.executes(context -> resetCampaignProgress(context.getSource().getPlayerOrThrow())))
+			.then(CommandManager.literal("clearprogress")
+				.requires(source -> source.hasPermissionLevel(2))
+				.executes(context -> resetCampaignProgress(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("startsiege")
 				.executes(context -> startSiege(context.getSource().getPlayerOrThrow())))
 			.then(CommandManager.literal("debugpath")
@@ -155,6 +161,17 @@ public final class ModCommands {
 		player.sendMessage(
 			Text.literal("Siege path debug render " + (enabled ? "enabled" : "disabled") + ".")
 				.formatted(enabled ? Formatting.GREEN : Formatting.YELLOW),
+			false
+		);
+		return 1;
+	}
+
+	private static int resetCampaignProgress(ServerPlayerEntity player) {
+		SiegeBaseState state = SiegeBaseState.get(player.getServer());
+		state.resetCampaignProgress();
+		player.sendMessage(
+			Text.literal("Campaign progress reset to Homestead. Settlement, rally, and placed defenders were kept for testing.")
+				.formatted(Formatting.GREEN),
 			false
 		);
 		return 1;

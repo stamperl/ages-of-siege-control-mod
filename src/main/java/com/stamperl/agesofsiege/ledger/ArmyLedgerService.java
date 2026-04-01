@@ -193,7 +193,7 @@ public final class ArmyLedgerService {
 				definition.ageDefining(),
 				definition.isUnlocked(state),
 				definition.isReplay(state),
-				definition.hasRam(),
+				definition.ramCount(),
 				definition.routeColumn(),
 				definition.routeRow(),
 				definition.enemySummary(),

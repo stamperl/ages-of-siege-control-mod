@@ -1,26 +1,58 @@
 # Ages Of Siege Control Mod
 
-This repository contains the custom Fabric gameplay mod for `Ages Of Siege`.
+The `Ages Of Siege Control Mod` is the custom Fabric gameplay layer that drives the `Ages Of Siege` campaign loop.
 
-## First Slice
+It adds settlement claiming, defender management, siege planning, staged assaults, and quest-style siege progression on top of vanilla Minecraft and the wider pack.
 
-The first playable slice keeps the opening close to vanilla Minecraft:
+## What The Mod Does
 
-- start a world normally
-- gather resources and build a shelter
-- choose the base you want to defend later
-- mark that base with the `Settlement Standard` item or a command
+- lets the player claim a base with the `Settlement Standard`
+- lets the player place a `Raid Rally Banner` to define the attacker staging point
+- adds an `Army Ledger` screen for:
+  - defender placement and post management
+  - tactical map review
+  - siege chapter / quest-node selection
+  - siege preview, staging, locking, and starting
+- tracks campaign progress across ages and siege routes
+- supports replayable raids, age-defining milestone sieges, and war-supplies rewards
+- includes defender tokens, recall tooling, and runtime AI for soldiers and archers
+- stores persistent settlement, defender, and siege state in the world save
 
-No siege starts automatically yet. This mod only lays the first clean foundation for base ownership, later siege waves, and age progression.
+## Current Gameplay Flow
 
-## Main Features
+1. Craft or obtain a `Settlement Standard`
+2. Claim the settlement you want to defend
+3. Place a `Raid Rally Banner`
+4. Open the `Army Ledger`
+5. Choose a siege node from the quest-style campaign view
+6. Place and prepare defenders
+7. Lock the siege, then start it from the ledger
+8. Win raids to unlock harder routes and age-defining sieges
 
-- persistent world save data for the claimed base
-- `Settlement Standard` item to claim a base
+## Commands
+
 - `/agesofsiege status`
 - `/agesofsiege setbase`
 - `/agesofsiege clearbase`
-- `/give @s ages_of_siege:settlement_standard`
+- `/agesofsiege resetprogress`
+- `/agesofsiege clearprogress`
+
+These are mainly useful for testing and debugging while the campaign is still being built out.
+
+## Dependencies
+
+Required runtime dependencies:
+
+- Minecraft `1.20.1`
+- Fabric Loader `0.18.4` or newer
+- Fabric API `0.92.7+1.20.1`
+- Java `17`
+
+Build-time dependencies:
+
+- Gradle wrapper in this repo
+- Yarn mappings `1.20.1+build.10`
+- Fabric Loom `1.6-SNAPSHOT`
 
 ## Build
 
@@ -28,14 +60,22 @@ No siege starts automatically yet. This mod only lays the first clean foundation
 .\gradlew.bat build
 ```
 
-The built jar appears in `build\libs\`.
+The built jar is written to:
 
-## Local Pack Testing
+- [build\libs\ages-of-siege-control-0.1.0.jar](C:\Users\Stamp\OneDrive\Documents\Ages%20Of%20Siege%20Control%20Mod\build\libs\ages-of-siege-control-0.1.0.jar)
 
-Copy the remapped jar from `build\libs\` into your Prism instance `mods` folder to test it with the pack.
+## Local Testing Paths
 
-You can also run:
+Common local install targets used in this workspace:
 
-```powershell
-.\install-to-prism.bat
-```
+- [Prism instance mods folder](C:\Users\Stamp\AppData\Roaming\PrismLauncher\instances\Ages%20Of%20Siege-0.1.0\minecraft\mods)
+- [Pack Prism mods folder](C:\Users\Stamp\OneDrive\Documents\Ages%20Of%20Siege%20Pack\tools\prism\instances\Ages%20Of%20Siege-0.1.0\minecraft\mods)
+
+If present, the local quest configuration is generated/read from:
+
+- [config\ages_of_siege\siege_quests.json](C:\Users\Stamp\OneDrive\Documents\Ages%20Of%20Siege%20Control%20Mod\config\ages_of_siege\siege_quests.json)
+
+## Repository
+
+- Local workspace: [Ages Of Siege Control Mod](C:\Users\Stamp\OneDrive\Documents\Ages%20Of%20Siege%20Control%20Mod)
+- GitHub: [stamperl/ages-of-siege-control-mod](https://github.com/stamperl/ages-of-siege-control-mod)

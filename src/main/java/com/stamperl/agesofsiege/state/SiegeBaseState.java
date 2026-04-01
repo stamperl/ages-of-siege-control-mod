@@ -444,6 +444,20 @@ public class SiegeBaseState extends PersistentState {
 		markDirty();
 	}
 
+	public void resetCampaignProgress() {
+		this.ageLevel = 0;
+		this.completedSieges = 0;
+		this.currentAgeRegularWins = 0;
+		this.siegeFailed = false;
+		this.activeSession = null;
+		this.assaultOrigin = null;
+		this.selectedSiegeId = SiegeCatalog.defaultSiegeForAge(0).id();
+		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
+		this.wallHealth.clear();
+		resetCompatRuntime();
+		markDirty();
+	}
+
 	public String getAgeName() {
 		return AGE_NAMES[MathHelper.clamp(ageLevel, 0, AGE_NAMES.length - 1)];
 	}
