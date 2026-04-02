@@ -1,7 +1,9 @@
 package com.stamperl.agesofsiege.siege.service;
 
+import com.stamperl.agesofsiege.AgesOfSiegeMod;
 import com.stamperl.agesofsiege.entity.SiegeRamEntity;
 import com.stamperl.agesofsiege.siege.WallTier;
+import com.stamperl.agesofsiege.siege.runtime.BreachCapability;
 import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
 import com.stamperl.agesofsiege.siege.runtime.SiegePlan;
 import com.stamperl.agesofsiege.siege.runtime.SiegePlanType;
@@ -20,8 +22,10 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public final class SiegeUnitController {
@@ -33,6 +37,7 @@ public final class SiegeUnitController {
 
 	private final ObjectiveService objectiveService = new ObjectiveService();
 	private final RamController ramController = new RamController();
+	private final Set<String> fallbackLoggedSessions = new HashSet<>();
 
 	public void dispatch(ServerWorld world, SiegeBaseState state, SiegeSession session) {
 		if (session.getPhase() == SiegePhase.STAGED || session.getPhase() == SiegePhase.COUNTDOWN) {
@@ -43,8 +48,12 @@ public final class SiegeUnitController {
 		Map<UUID, UnitRole> assignments = session.getRoleAssignments();
 		SiegePlan plan = session.getCurrentPlan();
 		BlockPos objectivePos = session.getObjectivePos();
-		List<Vec3d> breacherPositions = new ArrayList<>();
+		List<Vec3d> primaryBreacherPositions = new ArrayList<>();
 		List<LivingEntity> placedDefenders = resolvePlacedDefenders(world, state);
+		boolean hasLivingActiveRam = hasLivingActiveRam(world, session);
+		boolean hasLivingPrimaryBreacher = hasLivingPrimaryBreacher(world, session);
+		boolean fallbackBreachEnabled = !hasLivingPrimaryBreacher && !hasLivingActiveRam;
+		handleFallbackBreachLogging(session, fallbackBreachEnabled, hasLivingPrimaryBreacher, hasLivingActiveRam);
 
 		for (UUID attackerId : session.getAttackerIds()) {
 			Entity entity = world.getEntity(attackerId);
@@ -52,13 +61,19 @@ public final class SiegeUnitController {
 				continue;
 			}
 			UnitRole role = assignments.getOrDefault(attackerId, UnitRole.RANGED);
-			if (role == UnitRole.BREACHER) {
-				breacherPositions.add(hostile.getPos());
+			BreachCapability breachCapability = breachCapabilityFor(hostile, role);
+			int wallDamage = wallDamageFor(hostile, breachCapability);
+			if (breachCapability == BreachCapability.PRIMARY) {
+				primaryBreacherPositions.add(hostile.getPos());
+			}
+			if (fallbackBreachEnabled && breachCapability != BreachCapability.NONE) {
+				controlFallbackBreacher(hostile, world, state, session, plan, objectivePos, wallDamage);
+				continue;
 			}
 			switch (role) {
-				case BREACHER -> controlBreacher(hostile, world, state, session, plan, objectivePos);
-				case RANGED -> controlRanged(hostile, world, state, session, plan, objectivePos, breacherPositions, placedDefenders);
-				case ESCORT -> controlEscort(hostile, world, state, session, plan, objectivePos, breacherPositions, placedDefenders);
+				case BREACHER -> controlPrimaryBreacher(hostile, world, state, session, plan, objectivePos, wallDamage);
+				case RANGED -> controlRanged(hostile, world, state, session, plan, objectivePos, primaryBreacherPositions, placedDefenders);
+				case ESCORT -> controlEscort(hostile, world, state, session, plan, objectivePos, primaryBreacherPositions, placedDefenders);
 				case RAM -> {
 				}
 			}
@@ -81,7 +96,7 @@ public final class SiegeUnitController {
 		}
 	}
 
-	private void controlBreacher(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, SiegePlan plan, BlockPos objectivePos) {
+	private void controlPrimaryBreacher(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, SiegePlan plan, BlockPos objectivePos, int wallDamage) {
 		if (session.getPhase() == SiegePhase.FORM_UP) {
 			moveToFormation(hostile, world, session);
 			return;
@@ -111,11 +126,39 @@ public final class SiegeUnitController {
 			}
 			BlockPos targetBlock = firstIntactTarget(world, plan.targetBlocks());
 			if (targetBlock != null) {
-				attackWall(hostile, world, state, targetBlock);
+				attackWall(hostile, world, state, targetBlock, wallDamage);
 				return;
 			}
 		}
 
+		attackObjective(hostile, world, state, session, objectivePos);
+	}
+
+	private void controlFallbackBreacher(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, SiegePlan plan, BlockPos objectivePos, int wallDamage) {
+		if (session.getPhase() == SiegePhase.FORM_UP) {
+			moveToFormation(hostile, world, session);
+			return;
+		}
+		hostile.setTarget(null);
+		if (session.getPhase() == SiegePhase.RUSH) {
+			attackObjective(hostile, world, state, session, objectivePos);
+			return;
+		}
+		if (plan == null) {
+			moveToward(hostile, world, Vec3d.ofCenter(objectivePos), 1.0D);
+			return;
+		}
+		if (plan.planType() == SiegePlanType.BREACH_REQUIRED || plan.planType() == SiegePlanType.FALLBACK_PUSH) {
+			if (plan.stagingPoint() != null && hostile.squaredDistanceTo(Vec3d.ofCenter(plan.stagingPoint())) > 16.0D) {
+				moveToward(hostile, world, Vec3d.ofCenter(plan.stagingPoint()), 1.0D);
+				return;
+			}
+			BlockPos targetBlock = firstIntactTarget(world, plan.targetBlocks());
+			if (targetBlock != null) {
+				attackWall(hostile, world, state, targetBlock, wallDamage);
+				return;
+			}
+		}
 		attackObjective(hostile, world, state, session, objectivePos);
 	}
 
@@ -231,7 +274,7 @@ public final class SiegeUnitController {
 		}
 	}
 
-	private void attackWall(HostileEntity hostile, ServerWorld world, SiegeBaseState state, BlockPos targetBlock) {
+	private void attackWall(HostileEntity hostile, ServerWorld world, SiegeBaseState state, BlockPos targetBlock, int wallDamage) {
 		Vec3d target = Vec3d.ofCenter(targetBlock);
 		if (hostile.squaredDistanceTo(target) > 9.0D) {
 			moveToward(hostile, world, target, 1.0D);
@@ -241,7 +284,7 @@ public final class SiegeUnitController {
 		hostile.setYaw((float) (MathHelper.atan2(target.z - hostile.getZ(), target.x - hostile.getX()) * (180.0D / Math.PI)) - 90.0F);
 		hostile.swingHand(Hand.MAIN_HAND);
 		if (hostile.age % 15 == 0) {
-			state.damageWall(world, targetBlock, 1);
+			state.damageWall(world, targetBlock, Math.max(1, wallDamage));
 		}
 	}
 
@@ -381,5 +424,71 @@ public final class SiegeUnitController {
 			}
 		}
 		return false;
+	}
+
+	private boolean hasLivingPrimaryBreacher(ServerWorld world, SiegeSession session) {
+		for (UUID attackerId : session.getAttackerIds()) {
+			Entity entity = world.getEntity(attackerId);
+			if (entity instanceof HostileEntity hostile && hostile.isAlive() && breachCapabilityFor(hostile, session.getRoleAssignments().getOrDefault(attackerId, UnitRole.RANGED)) == BreachCapability.PRIMARY) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean hasLivingActiveRam(ServerWorld world, SiegeSession session) {
+		for (UUID ramId : session.getEngineIds()) {
+			Entity entity = world.getEntity(ramId);
+			if (entity instanceof SiegeRamEntity ram && ram.isAlive()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private BreachCapability breachCapabilityFor(Entity entity, UnitRole role) {
+		if (entity.getCommandTags().contains(BattleUnitRegistry.BREACH_PRIMARY_TAG)) {
+			return BreachCapability.PRIMARY;
+		}
+		if (entity.getCommandTags().contains(BattleUnitRegistry.BREACH_FALLBACK_TAG)) {
+			return BreachCapability.FALLBACK;
+		}
+		if (entity.getCommandTags().contains(BattleUnitRegistry.BREACH_NONE_TAG)) {
+			return BreachCapability.NONE;
+		}
+		return switch (role) {
+			case BREACHER, RAM -> BreachCapability.PRIMARY;
+			default -> BreachCapability.FALLBACK;
+		};
+	}
+
+	private int wallDamageFor(Entity entity, BreachCapability capability) {
+		for (String tag : entity.getCommandTags()) {
+			if (!tag.startsWith(BattleUnitRegistry.WALL_DAMAGE_TAG_PREFIX)) {
+				continue;
+			}
+			try {
+				return Math.max(0, Integer.parseInt(tag.substring(BattleUnitRegistry.WALL_DAMAGE_TAG_PREFIX.length())));
+			} catch (NumberFormatException ignored) {
+				break;
+			}
+		}
+		return capability == BreachCapability.PRIMARY ? 2 : capability == BreachCapability.FALLBACK ? 1 : 0;
+	}
+
+	private void handleFallbackBreachLogging(SiegeSession session, boolean fallbackBreachEnabled, boolean hasLivingPrimaryBreacher, boolean hasLivingActiveRam) {
+		String sessionKey = session.getStartedGameTime() + ":" + String.valueOf(session.getObjectivePos());
+		if (fallbackBreachEnabled) {
+			if (fallbackLoggedSessions.add(sessionKey)) {
+				AgesOfSiegeMod.LOGGER.info(
+					"Fallback breach activated for siege session {}. primaryBreacherAlive={}, activeRamAlive={}. Remaining attackers may breach walls at reduced damage.",
+					sessionKey,
+					hasLivingPrimaryBreacher,
+					hasLivingActiveRam
+				);
+			}
+			return;
+		}
+		fallbackLoggedSessions.remove(sessionKey);
 	}
 }

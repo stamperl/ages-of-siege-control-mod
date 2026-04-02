@@ -1,6 +1,7 @@
 package com.stamperl.agesofsiege.ledger;
 
 import com.stamperl.agesofsiege.defense.DefenderRole;
+import com.stamperl.agesofsiege.siege.runtime.UnitRole;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.math.BlockPos;
 
@@ -30,7 +31,8 @@ public record ArmyLedgerSnapshot(
 	boolean canStartSiege,
 	String siegeStatus,
 	List<SiegeEntry> sieges,
-	List<DefenderEntry> defenders
+	List<DefenderEntry> defenders,
+	List<AttackerEntry> attackers
 ) {
 	public void write(PacketByteBuf buf) {
 		buf.writeBoolean(hasBase);
@@ -60,6 +62,10 @@ public record ArmyLedgerSnapshot(
 		buf.writeVarInt(defenders.size());
 		for (DefenderEntry defender : defenders) {
 			defender.write(buf);
+		}
+		buf.writeVarInt(attackers.size());
+		for (AttackerEntry attacker : attackers) {
+			attacker.write(buf);
 		}
 	}
 
@@ -94,6 +100,11 @@ public record ArmyLedgerSnapshot(
 		for (int i = 0; i < defenderCount; i++) {
 			defenders.add(DefenderEntry.read(buf));
 		}
+		int attackerCount = buf.readVarInt();
+		List<AttackerEntry> attackers = new ArrayList<>();
+		for (int i = 0; i < attackerCount; i++) {
+			attackers.add(AttackerEntry.read(buf));
+		}
 		return new ArmyLedgerSnapshot(
 			hasBase,
 			bannerPos,
@@ -116,7 +127,8 @@ public record ArmyLedgerSnapshot(
 			canStartSiege,
 			siegeStatus,
 			sieges,
-			defenders
+			defenders,
+			attackers
 		);
 	}
 
@@ -136,7 +148,10 @@ public record ArmyLedgerSnapshot(
 		String enemySummary,
 		String weaponSummary,
 		String threatSummary,
-		int warSuppliesReward
+		String breachSummary,
+		int warSuppliesReward,
+		String battleProfileId,
+		List<BattleGroupEntry> battleGroups
 	) {
 		public void write(PacketByteBuf buf) {
 			buf.writeString(id);
@@ -154,27 +169,82 @@ public record ArmyLedgerSnapshot(
 			buf.writeString(enemySummary);
 			buf.writeString(weaponSummary);
 			buf.writeString(threatSummary);
+			buf.writeString(breachSummary);
 			buf.writeVarInt(warSuppliesReward);
+			buf.writeString(battleProfileId);
+			buf.writeVarInt(battleGroups.size());
+			for (BattleGroupEntry group : battleGroups) {
+				group.write(buf);
+			}
 		}
 
 		public static SiegeEntry read(PacketByteBuf buf) {
+			String id = buf.readString();
+			String name = buf.readString();
+			String description = buf.readString();
+			int ageLevel = buf.readVarInt();
+			int unlockVictories = buf.readVarInt();
+			int waveSize = buf.readVarInt();
+			boolean ageDefining = buf.readBoolean();
+			boolean unlocked = buf.readBoolean();
+			boolean replay = buf.readBoolean();
+			int ramCount = buf.readVarInt();
+			int routeColumn = buf.readVarInt();
+			int routeRow = buf.readVarInt();
+			String enemySummary = buf.readString();
+			String weaponSummary = buf.readString();
+			String threatSummary = buf.readString();
+			String breachSummary = buf.readString();
+			int warSuppliesReward = buf.readVarInt();
+			String battleProfileId = buf.readString();
+			int battleGroupCount = buf.readVarInt();
+			List<BattleGroupEntry> battleGroups = new ArrayList<>();
+			for (int i = 0; i < battleGroupCount; i++) {
+				battleGroups.add(BattleGroupEntry.read(buf));
+			}
 			return new SiegeEntry(
-				buf.readString(),
+				id,
+				name,
+				description,
+				ageLevel,
+				unlockVictories,
+				waveSize,
+				ageDefining,
+				unlocked,
+				replay,
+				ramCount,
+				routeColumn,
+				routeRow,
+				enemySummary,
+				weaponSummary,
+				threatSummary,
+				breachSummary,
+				warSuppliesReward,
+				battleProfileId,
+				battleGroups
+			);
+		}
+	}
+
+	public record BattleGroupEntry(
+		String kindId,
+		String displayName,
+		int count,
+		boolean engine
+	) {
+		public void write(PacketByteBuf buf) {
+			buf.writeString(kindId);
+			buf.writeString(displayName);
+			buf.writeVarInt(count);
+			buf.writeBoolean(engine);
+		}
+
+		public static BattleGroupEntry read(PacketByteBuf buf) {
+			return new BattleGroupEntry(
 				buf.readString(),
 				buf.readString(),
 				buf.readVarInt(),
-				buf.readVarInt(),
-				buf.readVarInt(),
-				buf.readBoolean(),
-				buf.readBoolean(),
-				buf.readBoolean(),
-				buf.readVarInt(),
-				buf.readVarInt(),
-				buf.readVarInt(),
-				buf.readString(),
-				buf.readString(),
-				buf.readString(),
-				buf.readVarInt()
+				buf.readBoolean()
 			);
 		}
 	}
@@ -218,6 +288,32 @@ public record ArmyLedgerSnapshot(
 				buf.readFloat(),
 				buf.readVarInt(),
 				buf.readString(),
+				buf.readBoolean()
+			);
+		}
+	}
+
+	public record AttackerEntry(
+		UUID entityUuid,
+		BlockPos currentPos,
+		UnitRole role,
+		boolean engine,
+		boolean online
+	) {
+		public void write(PacketByteBuf buf) {
+			buf.writeUuid(entityUuid);
+			buf.writeBlockPos(currentPos);
+			buf.writeEnumConstant(role);
+			buf.writeBoolean(engine);
+			buf.writeBoolean(online);
+		}
+
+		public static AttackerEntry read(PacketByteBuf buf) {
+			return new AttackerEntry(
+				buf.readUuid(),
+				buf.readBlockPos(),
+				buf.readEnumConstant(UnitRole.class),
+				buf.readBoolean(),
 				buf.readBoolean()
 			);
 		}

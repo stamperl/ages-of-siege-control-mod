@@ -3,9 +3,12 @@ package com.stamperl.agesofsiege.ledger;
 import com.stamperl.agesofsiege.AgesOfSiegeMod;
 import com.stamperl.agesofsiege.defense.DefenderRole;
 import com.stamperl.agesofsiege.defense.DefenderSpawnerService;
+import com.stamperl.agesofsiege.siege.SiegeBattleCatalog;
 import com.stamperl.agesofsiege.siege.SiegeCatalog;
 import com.stamperl.agesofsiege.siege.SiegeDirector;
+import com.stamperl.agesofsiege.siege.runtime.SiegeBattlePlan;
 import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
+import com.stamperl.agesofsiege.siege.runtime.UnitRole;
 import com.stamperl.agesofsiege.state.PlacedDefender;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -110,6 +113,7 @@ public final class ArmyLedgerService {
 		SiegeBaseState state = SiegeBaseState.get(player.getServer());
 		ServerWorld baseWorld = state.getBaseWorld(player.getServer());
 		List<ArmyLedgerSnapshot.DefenderEntry> defenders = buildDefenderEntries(player, state);
+		List<ArmyLedgerSnapshot.AttackerEntry> attackers = buildAttackerEntries(player, state);
 		List<ArmyLedgerSnapshot.SiegeEntry> sieges = buildSiegeEntries(state);
 		SiegeCatalog.SiegeDefinition selectedSiege = resolveSelectedSiege(state);
 		String phase = state.getActiveSession() == null ? "at peace" : state.getActiveSession().getPhase().name().toLowerCase(Locale.ROOT);
@@ -147,7 +151,8 @@ public final class ArmyLedgerService {
 			canStartSiege,
 			siegeStatus,
 			sieges,
-			defenders
+			defenders,
+			attackers
 		);
 	}
 
@@ -183,26 +188,187 @@ public final class ArmyLedgerService {
 	private static List<ArmyLedgerSnapshot.SiegeEntry> buildSiegeEntries(SiegeBaseState state) {
 		List<ArmyLedgerSnapshot.SiegeEntry> sieges = new ArrayList<>();
 		for (SiegeCatalog.SiegeDefinition definition : SiegeCatalog.allForState(state)) {
+			BattlePreview preview = resolveBattlePreview(state, definition);
 			sieges.add(new ArmyLedgerSnapshot.SiegeEntry(
 				definition.id(),
 				definition.displayName(),
 				definition.description(),
 				definition.ageLevel(),
 				definition.requiredRegularWins(),
-				definition.waveSize(),
+				preview.waveSize(),
 				definition.ageDefining(),
 				definition.isUnlocked(state),
 				definition.isReplay(state),
-				definition.ramCount(),
+				preview.ramCount(),
 				definition.routeColumn(),
 				definition.routeRow(),
-				definition.enemySummary(),
-				definition.weaponSummary(),
-				definition.threatSummary(),
-				definition.warSuppliesReward()
+				preview.enemySummary(),
+				preview.weaponSummary(),
+				preview.threatSummary(),
+				preview.breachSummary(),
+				definition.warSuppliesReward(),
+				preview.profileId(),
+				preview.battleGroups()
 			));
 		}
 		return sieges;
+	}
+
+	private static BattlePreview resolveBattlePreview(SiegeBaseState state, SiegeCatalog.SiegeDefinition definition) {
+		SiegeBattlePlan plan = SiegeBattleCatalog.resolve(state, definition);
+		if (plan.isEmpty()) {
+			return legacyBattlePreview(definition);
+		}
+		List<ArmyLedgerSnapshot.BattleGroupEntry> groups = new ArrayList<>();
+		for (SiegeBattlePlan.UnitGroup unitGroup : plan.unitGroups()) {
+			groups.add(new ArmyLedgerSnapshot.BattleGroupEntry(
+				unitGroup.unitKind(),
+				previewGroupLabel(unitGroup.role().name(), unitGroup.unitKind()),
+				Math.max(0, unitGroup.count()),
+				false
+			));
+		}
+		for (SiegeBattlePlan.EngineGroup engineGroup : plan.engineGroups()) {
+			groups.add(new ArmyLedgerSnapshot.BattleGroupEntry(
+				engineGroup.engineKind(),
+				previewGroupLabel(engineGroup.engineKind(), engineGroup.engineKind()),
+				Math.max(0, engineGroup.count()),
+				true
+			));
+		}
+		if (groups.isEmpty()) {
+			groups = legacyBattleGroups(definition);
+		}
+		return new BattlePreview(
+			plan.profileId(),
+			Math.max(1, plan.waveSize()),
+			Math.max(0, plan.ramCount()),
+			firstNonBlank(plan.enemySummary(), definition.enemySummary()),
+			firstNonBlank(plan.weaponSummary(), definition.weaponSummary()),
+			firstNonBlank(plan.threatSummary(), definition.threatSummary()),
+			plan.breachSummary(),
+			groups
+		);
+	}
+
+	private static BattlePreview legacyBattlePreview(SiegeCatalog.SiegeDefinition definition) {
+		return new BattlePreview(
+			definition.id(),
+			Math.max(1, definition.waveSize()),
+			Math.max(0, definition.ramCount()),
+			definition.enemySummary(),
+			definition.weaponSummary(),
+			definition.threatSummary(),
+			definition.ramCount() > 0 ? "ram only" : "fallback",
+			legacyBattleGroups(definition)
+		);
+	}
+
+	private static List<ArmyLedgerSnapshot.BattleGroupEntry> legacyBattleGroups(SiegeCatalog.SiegeDefinition definition) {
+		List<ArmyLedgerSnapshot.BattleGroupEntry> groups = new ArrayList<>();
+		if (definition.waveSize() > 0) {
+			groups.add(new ArmyLedgerSnapshot.BattleGroupEntry(
+				"assault",
+				definition.minorRaid() ? "Raid Force" : "Main Force",
+				definition.waveSize(),
+				false
+			));
+		}
+		if (definition.ramCount() > 0) {
+			groups.add(new ArmyLedgerSnapshot.BattleGroupEntry(
+				"engine",
+				definition.ramCount() > 1 ? "Siege Engines" : "Siege Engine",
+				definition.ramCount(),
+				true
+			));
+		}
+		return groups;
+	}
+
+	private static String previewGroupLabel(String preferred, String fallback) {
+		String label = firstNonBlank(preferred, fallback);
+		if (label == null || label.isBlank()) {
+			return "Group";
+		}
+		String cleaned = label.replace('_', ' ').trim();
+		if (cleaned.isEmpty()) {
+			return "Group";
+		}
+		String[] parts = cleaned.split("\\s+");
+		StringBuilder builder = new StringBuilder();
+		for (String part : parts) {
+			if (part.isEmpty()) {
+				continue;
+			}
+			if (!builder.isEmpty()) {
+				builder.append(' ');
+			}
+			String lower = part.toLowerCase(Locale.ROOT);
+			builder.append(Character.toUpperCase(lower.charAt(0))).append(lower.substring(1));
+		}
+		return builder.isEmpty() ? "Group" : builder.toString();
+	}
+
+	private static String firstNonBlank(String... values) {
+		if (values == null) {
+			return "";
+		}
+		for (String value : values) {
+			if (value != null && !value.isBlank()) {
+				return value.trim();
+			}
+		}
+		return "";
+	}
+
+	private record BattlePreview(
+		String profileId,
+		int waveSize,
+		int ramCount,
+		String enemySummary,
+		String weaponSummary,
+		String threatSummary,
+		String breachSummary,
+		List<ArmyLedgerSnapshot.BattleGroupEntry> battleGroups
+	) {
+		private BattlePreview {
+			profileId = profileId == null ? "" : profileId.trim();
+			enemySummary = enemySummary == null ? "" : enemySummary.trim();
+			weaponSummary = weaponSummary == null ? "" : weaponSummary.trim();
+			threatSummary = threatSummary == null ? "" : threatSummary.trim();
+			breachSummary = breachSummary == null ? "" : breachSummary.trim();
+			battleGroups = battleGroups == null ? List.of() : List.copyOf(battleGroups);
+		}
+	}
+
+	private static List<ArmyLedgerSnapshot.AttackerEntry> buildAttackerEntries(ServerPlayerEntity player, SiegeBaseState state) {
+		List<ArmyLedgerSnapshot.AttackerEntry> attackers = new ArrayList<>();
+		if (state.getActiveSession() == null) {
+			return attackers;
+		}
+		ServerWorld world = state.getBaseWorld(player.getServer());
+		if (world == null) {
+			return attackers;
+		}
+		List<UUID> engineIds = state.getActiveSession().getEngineIds();
+		for (UUID attackerId : state.getActiveSession().getAttackerIds()) {
+			Entity entity = world.getEntity(attackerId);
+			if (!(entity instanceof LivingEntity living) || !living.isAlive()) {
+				continue;
+			}
+			UnitRole role = state.getActiveSession().getRoleAssignments().getOrDefault(
+				attackerId,
+				engineIds.contains(attackerId) ? UnitRole.RAM : UnitRole.ESCORT
+			);
+			attackers.add(new ArmyLedgerSnapshot.AttackerEntry(
+				attackerId,
+				living.getBlockPos(),
+				role,
+				engineIds.contains(attackerId),
+				true
+			));
+		}
+		return attackers;
 	}
 
 	private static String buildSiegeStatus(

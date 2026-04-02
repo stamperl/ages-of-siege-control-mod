@@ -3,12 +3,13 @@ package com.stamperl.agesofsiege.siege;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.stamperl.agesofsiege.AgesOfSiegeMod;
+import com.stamperl.agesofsiege.siege.runtime.BreachCapability;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -20,12 +21,13 @@ import java.util.Objects;
 
 public final class SiegeCatalog {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+	private static final String BUNDLED_DEFAULT_PATH = "/defaults/ages_of_siege/siege_quests.json";
 	private static final Path CONFIG_PATH = FabricLoader.getInstance()
 		.getConfigDir()
 		.resolve("ages_of_siege")
 		.resolve("siege_quests.json");
 	private static final List<SiegeDefinition> BUILT_IN_DEFINITIONS = List.copyOf(buildBuiltInDefinitions());
-	private static volatile List<SiegeDefinition> definitions = BUILT_IN_DEFINITIONS;
+	private static volatile CatalogState catalogState = CatalogState.fromLegacyDefinitions(BUILT_IN_DEFINITIONS);
 
 	private SiegeCatalog() {
 	}
@@ -34,178 +36,71 @@ public final class SiegeCatalog {
 		try {
 			Files.createDirectories(CONFIG_PATH.getParent());
 			if (Files.notExists(CONFIG_PATH)) {
-				writeConfig(CONFIG_PATH, BUILT_IN_DEFINITIONS);
-				AgesOfSiegeMod.LOGGER.info("Generated default siege quest config at {}", CONFIG_PATH);
+				copyBundledDefaultConfig(CONFIG_PATH);
+				AgesOfSiegeMod.LOGGER.info("Copied bundled siege quest config to {}", CONFIG_PATH);
 			}
-			List<SiegeDefinition> loaded = loadConfig(CONFIG_PATH);
-			definitions = loaded.isEmpty() ? BUILT_IN_DEFINITIONS : List.copyOf(loaded);
-			AgesOfSiegeMod.LOGGER.info("Loaded {} siege quest definitions from {}", definitions.size(), CONFIG_PATH);
+			CatalogState loaded = loadConfig(CONFIG_PATH);
+			catalogState = loaded == null ? CatalogState.fromLegacyDefinitions(BUILT_IN_DEFINITIONS) : loaded;
+			AgesOfSiegeMod.LOGGER.info(
+				"Loaded {} siege quest nodes and {} battle templates from {}",
+				catalogState.campaignNodes().size(),
+				catalogState.battleTemplates().size(),
+				CONFIG_PATH
+			);
 		} catch (Exception exception) {
-			definitions = BUILT_IN_DEFINITIONS;
+			catalogState = CatalogState.fromLegacyDefinitions(BUILT_IN_DEFINITIONS);
 			AgesOfSiegeMod.LOGGER.error("Failed to load siege quest config from {}. Falling back to built-in defaults.", CONFIG_PATH, exception);
 		}
 	}
 
+	private static void copyBundledDefaultConfig(Path configPath) throws IOException {
+		try (InputStream input = SiegeCatalog.class.getResourceAsStream(BUNDLED_DEFAULT_PATH)) {
+			if (input == null) {
+				throw new IOException("Bundled default siege config is missing: " + BUNDLED_DEFAULT_PATH);
+			}
+			Files.copy(input, configPath);
+		}
+	}
+
 	public static List<SiegeDefinition> all() {
-		return definitions;
+		return catalogState.all();
 	}
 
 	public static List<SiegeDefinition> allForState(SiegeBaseState state) {
-		return all().stream()
-			.map(definition -> resolveForState(state, definition.id()))
-			.toList();
+		return catalogState.allForState(state);
 	}
 
 	public static SiegeDefinition byId(String id) {
-		for (SiegeDefinition definition : all()) {
-			if (definition.id().equals(id)) {
-				return definition;
-			}
-		}
-		return null;
+		return catalogState.byId(id);
 	}
 
 	public static SiegeDefinition resolveForState(SiegeBaseState state, String id) {
-		SiegeDefinition definition = byId(id);
-		if (definition == null || state == null || !definition.minorRaid()) {
-			return definition;
-		}
-		int variant = Math.floorMod(state.getCompletedSieges() + definition.routeColumn() + (state.getCurrentAgeRegularWins() * 2), 4);
-		String variantLabel = switch (variant) {
-			case 0 -> "Scouting Run";
-			case 1 -> "Shield Break";
-			case 2 -> "Crossfire Push";
-			default -> "Shock Column";
-		};
-		int waveSize = definition.waveSize() + variant;
-		int ramCount = definition.ageLevel() >= 1 && variant == 3 ? Math.max(1, definition.ramCount()) : 0;
-		String enemySummary = switch (definition.ageLevel()) {
-			case 0 -> switch (variant) {
-				case 0 -> "Scouts and fence-line raiders";
-				case 1 -> "Melee raiders with light shield cover";
-				case 2 -> "Crossbow raiders and flankers";
-				default -> "Mixed farm raiders with a heavy front";
-			};
-			case 1 -> switch (variant) {
-				case 0 -> "Wall scouts with axe teams";
-				case 1 -> "Gate raiders with shield escorts";
-				case 2 -> "Crossbow teams and breachers";
-				default -> "Heavy breach team with escort cover";
-			};
-			case 2 -> switch (variant) {
-				case 0 -> "Iron raiders probing the line";
-				case 1 -> "Escort wedge with breach tools";
-				case 2 -> "Ranged support behind a hard front";
-				default -> "Ram escort column and breach crew";
-			};
-			default -> switch (variant) {
-				case 0 -> "Industrial scouts and saboteurs";
-				case 1 -> "Press gangs with shielded escorts";
-				case 2 -> "Foundry shooters and breach teams";
-				default -> "Heavy industrial column with assault support";
-			};
-		};
-		String weaponSummary = switch (definition.ageLevel()) {
-			case 0 -> switch (variant) {
-				case 0 -> "Wooden tools and light crossbows";
-				case 1 -> "Axes, clubs, and rough shields";
-				case 2 -> "Crossbows, knives, and farm blades";
-				default -> "Mixed melee gear with a harder front";
-			};
-			case 1 -> switch (variant) {
-				case 0 -> "Crossbows, axes, and iron sidearms";
-				case 1 -> "Axes and reinforced shields";
-				case 2 -> "Crossbows with breach cutters";
-				default -> "Heavy tools, crossbows, and breach kits";
-			};
-			case 2 -> switch (variant) {
-				case 0 -> "Iron weapons and ranged cover";
-				case 1 -> "Heavy breach tools and escorts";
-				case 2 -> "Veteran crossbows and swords";
-				default -> "Ram tools, axes, and iron escort gear";
-			};
-			default -> switch (variant) {
-				case 0 -> "Industrial tools and raid bows";
-				case 1 -> "Reinforced axes and support shields";
-				case 2 -> "Crossbows, charges, and breach gear";
-				default -> "Heavy industrial breach tools and ram support";
-			};
-		};
-		String threatSummary = switch (variant) {
-			case 0 -> "Fast scouting pressure that shifts lanes.";
-			case 1 -> "Front-loaded melee pressure into one weak angle.";
-			case 2 -> "Ranged harassment with a timed breach push.";
-			default -> "Heavier assault timing with the toughest escort shell.";
-		};
-		return new SiegeDefinition(
-			definition.id(),
-			definition.displayName() + ": " + variantLabel,
-			"A generated raid contract that rotates its formation based on recent victories.",
-			definition.ageLevel(),
-			definition.routeColumn(),
-			definition.ageDefining(),
-			definition.requiredRegularWins(),
-			definition.routeRow(),
-			definition.combatTier() + (variant / 2),
-			waveSize,
-			ramCount,
-			enemySummary,
-			weaponSummary,
-			threatSummary,
-			definition.warSuppliesReward(),
-			true
-		);
+		return catalogState.resolveForState(state, id);
 	}
 
 	public static SiegeDefinition defaultSiegeForAge(int ageLevel) {
-		return all().stream()
-			.filter(definition -> definition.ageLevel() == ageLevel && !definition.ageDefining() && !definition.minorRaid())
-			.min(Comparator.comparingInt(SiegeDefinition::routeColumn))
-			.orElse(all().get(0));
+		return catalogState.defaultSiegeForAge(ageLevel);
 	}
 
 	public static SiegeDefinition highestUnlocked(SiegeBaseState state) {
-		SiegeDefinition unlocked = defaultSiegeForAge(state.getAgeLevel());
-		for (SiegeDefinition definition : all()) {
-			if (definition.isUnlocked(state)) {
-				unlocked = definition;
-			}
-		}
-		return unlocked;
+		return catalogState.highestUnlocked(state);
 	}
 
-	private static List<SiegeDefinition> loadConfig(Path configPath) throws IOException {
+	public static SiegeCampaignNode campaignNode(String id) {
+		return catalogState.campaignNode(id);
+	}
+
+	public static SiegeBattleTemplate battleTemplate(String id) {
+		return catalogState.battleTemplate(id);
+	}
+
+	private static CatalogState loadConfig(Path configPath) throws IOException {
 		try (Reader reader = Files.newBufferedReader(configPath)) {
 			SiegeConfigRoot root = GSON.fromJson(reader, SiegeConfigRoot.class);
-			if (root == null || root.sieges == null || root.sieges.isEmpty()) {
-				throw new IOException("No siege definitions found in config.");
+			if (root == null) {
+				throw new IOException("Siege config is empty or unreadable.");
 			}
-			List<SiegeDefinition> loaded = new ArrayList<>();
-			Map<String, SiegeDefinition> seen = new LinkedHashMap<>();
-			for (SiegeDefinitionJson json : root.sieges) {
-				SiegeDefinition definition = json.toDefinition();
-				if (seen.put(definition.id(), definition) != null) {
-					throw new IOException("Duplicate siege definition id: " + definition.id());
-				}
-				loaded.add(definition);
-			}
-			loaded.sort(Comparator
-				.comparingInt(SiegeDefinition::ageLevel)
-				.thenComparingInt(SiegeDefinition::routeColumn)
-				.thenComparingInt(SiegeDefinition::routeRow)
-				.thenComparing(SiegeDefinition::id));
-			return loaded;
-		}
-	}
-
-	private static void writeConfig(Path configPath, List<SiegeDefinition> sourceDefinitions) throws IOException {
-		SiegeConfigRoot root = new SiegeConfigRoot();
-		root.note = "Edit siege nodes here. routeColumn controls left-to-right order, routeRow controls the lane, and ageDefining should usually be the final milestone node for an age.";
-		root.sieges = sourceDefinitions.stream()
-			.map(SiegeDefinitionJson::fromDefinition)
-			.toList();
-		try (Writer writer = Files.newBufferedWriter(configPath)) {
-			GSON.toJson(root, writer);
+			return CatalogState.fromRoot(root);
 		}
 	}
 
@@ -515,9 +410,787 @@ public final class SiegeCatalog {
 		}
 	}
 
+	private static final class CatalogState {
+		private static final int CURRENT_SCHEMA_VERSION = 2;
+		private static final List<SiegeBattleVariant> DEFAULT_MINOR_RAID_VARIANTS = List.of(
+			new SiegeBattleVariant(
+				"scouting_run",
+				"Scouting Run",
+				"Light pressure with a flexible attack line.",
+				0,
+				0,
+				0,
+				"Adaptive raiders",
+				"Field gear and light crossbows",
+				"Fast probing pressure."
+			),
+			new SiegeBattleVariant(
+				"shield_break",
+				"Shield Break",
+				"Adds a little more body mass and front pressure.",
+				1,
+				0,
+				0,
+				"Adaptive raiders",
+				"Field gear and breaking tools",
+				"Forward pressure against the line."
+			),
+			new SiegeBattleVariant(
+				"crossfire_push",
+				"Crossfire Push",
+				"Brings stronger ranged harassment into the mix.",
+				1,
+				0,
+				1,
+				"Crossbow raiders",
+				"Crossbows, knives, and field gear",
+				"Ranged pressure with coordinated cover."
+			),
+			new SiegeBattleVariant(
+				"shock_column",
+				"Shock Column",
+				"A heavier, more committed push with breach support.",
+				2,
+				1,
+				1,
+				"Heavy adaptive raiders",
+				"Reinforced tools and siege support",
+				"Harder pressure with a stronger breach threat."
+			)
+		);
+
+		private final List<SiegeCampaignNode> campaignNodes;
+		private final List<SiegeBattleTemplate> battleTemplates;
+		private final Map<String, SiegeCampaignNode> campaignNodeById;
+		private final Map<String, SiegeBattleTemplate> battleTemplateById;
+		private final Map<String, SiegeDefinition> definitionById;
+		private final List<SiegeDefinition> orderedDefinitions;
+
+		private CatalogState(
+			List<SiegeCampaignNode> campaignNodes,
+			List<SiegeBattleTemplate> battleTemplates,
+			Map<String, SiegeCampaignNode> campaignNodeById,
+			Map<String, SiegeBattleTemplate> battleTemplateById,
+			Map<String, SiegeDefinition> definitionById,
+			List<SiegeDefinition> orderedDefinitions
+		) {
+			this.campaignNodes = campaignNodes;
+			this.battleTemplates = battleTemplates;
+			this.campaignNodeById = campaignNodeById;
+			this.battleTemplateById = battleTemplateById;
+			this.definitionById = definitionById;
+			this.orderedDefinitions = orderedDefinitions;
+		}
+
+		static CatalogState fromRoot(SiegeConfigRoot root) throws IOException {
+			if (root == null) {
+				throw new IOException("Siege config root is empty.");
+			}
+			boolean hasNewSchema = root.hasAnyCampaignData();
+			boolean hasLegacySchema = root.sieges != null && !root.sieges.isEmpty();
+			if (hasNewSchema) {
+				if (root.campaignNodes == null || root.campaignNodes.isEmpty()) {
+					throw new IOException("Siege config is missing campaignNodes.");
+				}
+				if (root.battleTemplates == null || root.battleTemplates.isEmpty()) {
+					throw new IOException("Siege config is missing battleTemplates.");
+				}
+				if (root.schemaVersion != null && root.schemaVersion != CURRENT_SCHEMA_VERSION) {
+					throw new IOException("Unsupported siege config schema version " + root.schemaVersion + ". Expected " + CURRENT_SCHEMA_VERSION + ".");
+				}
+				return fromCampaignSchema(root);
+			}
+			if (hasLegacySchema) {
+				return fromLegacyJson(root.sieges);
+			}
+			throw new IOException("Siege config must contain either campaignNodes/battleTemplates or legacy sieges.");
+		}
+
+		static CatalogState fromLegacyDefinitions(List<SiegeDefinition> definitions) {
+			List<SiegeCampaignNode> nodes = new ArrayList<>();
+			List<SiegeBattleTemplate> templates = new ArrayList<>();
+			for (SiegeDefinition definition : definitions) {
+				SiegeCampaignNode node = legacyNodeFromDefinition(definition);
+				SiegeBattleTemplate template = legacyTemplateFromDefinition(definition);
+				nodes.add(node);
+				templates.add(template);
+			}
+			return build(nodes, templates);
+		}
+
+		private static CatalogState fromLegacyJson(List<SiegeDefinitionJson> legacySieges) throws IOException {
+			List<SiegeDefinition> definitions = new ArrayList<>();
+			for (SiegeDefinitionJson json : legacySieges) {
+				definitions.add(json.toDefinition());
+			}
+			return fromLegacyDefinitions(definitions);
+		}
+
+		private static CatalogState fromCampaignSchema(SiegeConfigRoot root) throws IOException {
+			List<SiegeCampaignNode> nodes = new ArrayList<>();
+			for (SiegeCampaignNodeJson json : safeList(root.campaignNodes)) {
+				nodes.add(json.toNode());
+			}
+			List<SiegeBattleTemplate> templates = new ArrayList<>();
+			for (SiegeBattleTemplateJson json : safeList(root.battleTemplates)) {
+				templates.add(json.toTemplate());
+			}
+			return build(nodes, templates);
+		}
+
+		private static CatalogState build(List<SiegeCampaignNode> nodes, List<SiegeBattleTemplate> templates) {
+			List<String> errors = new ArrayList<>();
+			if (nodes == null || nodes.isEmpty()) {
+				errors.add("No campaign nodes defined.");
+			}
+			if (templates == null || templates.isEmpty()) {
+				errors.add("No battle templates defined.");
+			}
+			if (!errors.isEmpty()) {
+				throw new IllegalStateException(formatErrors(errors));
+			}
+
+			List<SiegeCampaignNode> sortedNodes = nodes.stream()
+				.sorted(Comparator
+					.comparingInt(SiegeCampaignNode::ageLevel)
+					.thenComparingInt(SiegeCampaignNode::routeColumn)
+					.thenComparingInt(SiegeCampaignNode::routeRow)
+					.thenComparing(SiegeCampaignNode::displayName)
+					.thenComparing(SiegeCampaignNode::id))
+				.toList();
+			List<SiegeBattleTemplate> sortedTemplates = templates.stream()
+				.sorted(Comparator.comparing(SiegeBattleTemplate::id))
+				.toList();
+
+			Map<String, SiegeCampaignNode> nodeById = new LinkedHashMap<>();
+			for (SiegeCampaignNode node : sortedNodes) {
+				validateNode(node, errors);
+				String id = node.id();
+				if (nodeById.putIfAbsent(id, node) != null) {
+					errors.add("Duplicate campaign node id: " + id);
+				}
+			}
+
+			Map<String, SiegeBattleTemplate> templateById = new LinkedHashMap<>();
+			for (SiegeBattleTemplate template : sortedTemplates) {
+				String id = template.id();
+				if (templateById.putIfAbsent(id, template) != null) {
+					errors.add("Duplicate battle template id: " + id);
+				}
+			}
+
+			for (SiegeCampaignNode node : sortedNodes) {
+				if (!templateById.containsKey(node.battleTemplateId())) {
+					errors.add("Campaign node '" + node.id() + "' references missing battle template '" + node.battleTemplateId() + "'.");
+				}
+			}
+
+			Map<Integer, Integer> maxRouteColumnByAge = new LinkedHashMap<>();
+			for (SiegeCampaignNode node : sortedNodes) {
+				maxRouteColumnByAge.merge(node.ageLevel(), node.routeColumn(), Math::max);
+			}
+			for (SiegeCampaignNode node : sortedNodes) {
+				if (node.ageDefining() && node.routeColumn() < maxRouteColumnByAge.getOrDefault(node.ageLevel(), node.routeColumn())) {
+					errors.add("Campaign node '" + node.id() + "' is ageDefining but is not terminal in age " + node.ageLevel() + ".");
+				}
+			}
+
+			for (SiegeBattleTemplate template : sortedTemplates) {
+				validateTemplate(template, errors);
+			}
+
+			if (!errors.isEmpty()) {
+				throw new IllegalStateException(formatErrors(errors));
+			}
+
+			Map<String, SiegeDefinition> definitionById = new LinkedHashMap<>();
+			List<SiegeDefinition> orderedDefinitions = new ArrayList<>();
+			for (SiegeCampaignNode node : sortedNodes) {
+				SiegeDefinition definition = resolveInternal(node, templateById.get(node.battleTemplateId()), null);
+				orderedDefinitions.add(definition);
+				definitionById.put(definition.id(), definition);
+			}
+
+			return new CatalogState(
+				List.copyOf(sortedNodes),
+				List.copyOf(sortedTemplates),
+				Map.copyOf(nodeById),
+				Map.copyOf(templateById),
+				Map.copyOf(definitionById),
+				List.copyOf(orderedDefinitions)
+			);
+		}
+
+		List<SiegeDefinition> all() {
+			return orderedDefinitions;
+		}
+
+		List<SiegeDefinition> allForState(SiegeBaseState state) {
+			List<SiegeDefinition> resolved = new ArrayList<>(campaignNodes.size());
+			for (SiegeCampaignNode node : campaignNodes) {
+				SiegeBattleTemplate template = battleTemplateById.get(node.battleTemplateId());
+				resolved.add(resolveInternal(node, template, state));
+			}
+			return List.copyOf(resolved);
+		}
+
+		SiegeDefinition byId(String id) {
+			return definitionById.get(normalizeId(id));
+		}
+
+		SiegeDefinition resolveForState(SiegeBaseState state, String id) {
+			SiegeCampaignNode node = campaignNodeById.get(normalizeId(id));
+			if (node == null) {
+				return null;
+			}
+			return resolveInternal(node, battleTemplateById.get(node.battleTemplateId()), state);
+		}
+
+		SiegeDefinition defaultSiegeForAge(int ageLevel) {
+			SiegeCampaignNode node = campaignNodes.stream()
+				.filter(entry -> entry.ageLevel() == ageLevel)
+				.sorted(Comparator
+					.comparingInt(SiegeCampaignNode::routeColumn)
+					.thenComparingInt(SiegeCampaignNode::routeRow)
+					.thenComparing(SiegeCampaignNode::displayName)
+					.thenComparing(SiegeCampaignNode::id))
+				.findFirst()
+				.orElse(campaignNodes.get(0));
+			return definitionById.get(node.id());
+		}
+
+		SiegeDefinition highestUnlocked(SiegeBaseState state) {
+			if (state == null) {
+				return orderedDefinitions.isEmpty() ? null : orderedDefinitions.get(0);
+			}
+			SiegeCampaignNode node = campaignNodes.stream()
+				.filter(entry -> entry.isUnlocked(state))
+				.sorted(Comparator
+					.comparingInt(SiegeCampaignNode::ageLevel)
+					.thenComparingInt(SiegeCampaignNode::routeColumn)
+					.thenComparingInt(SiegeCampaignNode::routeRow)
+					.thenComparing(SiegeCampaignNode::displayName)
+					.thenComparing(SiegeCampaignNode::id))
+				.reduce((first, second) -> second)
+				.orElse(campaignNodes.get(0));
+			return resolveInternal(node, battleTemplateById.get(node.battleTemplateId()), state);
+		}
+
+		SiegeCampaignNode campaignNode(String id) {
+			return campaignNodeById.get(normalizeId(id));
+		}
+
+		SiegeBattleTemplate battleTemplate(String id) {
+			return battleTemplateById.get(normalizeId(id));
+		}
+
+		List<SiegeCampaignNode> campaignNodes() {
+			return campaignNodes;
+		}
+
+		List<SiegeBattleTemplate> battleTemplates() {
+			return battleTemplates;
+		}
+
+		private static SiegeCampaignNode legacyNodeFromDefinition(SiegeDefinition definition) {
+			return new SiegeCampaignNode(
+				definition.id(),
+				definition.displayName(),
+				definition.description(),
+				definition.ageLevel(),
+				definition.routeColumn(),
+				definition.routeRow(),
+				definition.ageDefining(),
+				definition.requiredRegularWins(),
+				definition.id(),
+				definition.warSuppliesReward(),
+				definition.minorRaid()
+			);
+		}
+
+		private static SiegeBattleTemplate legacyTemplateFromDefinition(SiegeDefinition definition) {
+			int spawnTier = Math.max(0, Math.min(definition.ageLevel() + (definition.ageDefining() ? 1 : 0), 3));
+			List<SiegeUnitGroup> unitGroups = legacyUnitGroups(definition);
+			List<SiegeEngineGroup> engineGroups = definition.ramCount() > 0
+				? List.of(new SiegeEngineGroup(definition.id() + "_ram", "ram", "ages_of_siege:ram", definition.ramCount(), List.of("legacy", "siege")))
+				: List.of();
+			List<SiegeBattleVariant> variants = definition.minorRaid() ? DEFAULT_MINOR_RAID_VARIANTS : List.of();
+			return new SiegeBattleTemplate(
+				definition.id(),
+				spawnTier,
+				Math.max(definition.combatTier(), spawnTier),
+				definition.waveSize(),
+				definition.ramCount(),
+				legacyFormation(definition),
+				definition.enemySummary(),
+				definition.weaponSummary(),
+				definition.threatSummary(),
+				unitGroups,
+				engineGroups,
+				variants
+			);
+		}
+
+		private static List<SiegeUnitGroup> legacyUnitGroups(SiegeDefinition definition) {
+			int total = Math.max(1, definition.waveSize());
+			int front = Math.max(1, total / 3);
+			int rear = Math.max(1, total / 3);
+			int escort = Math.max(0, total - front - rear);
+			List<SiegeUnitGroup> groups = new ArrayList<>();
+			groups.add(new SiegeUnitGroup(definition.id() + "_front", definition.minorRaid() ? "adaptive_front" : "front_line", "minecraft:pillager", "ranged", front, definition.ageDefining() ? "milestone_line" : "field_line", List.of("legacy", "front"), BreachCapability.NONE, null));
+			groups.add(new SiegeUnitGroup(definition.id() + "_rear", definition.minorRaid() ? "adaptive_rear" : "rear_support", "minecraft:pillager", "escort", rear, definition.ageDefining() ? "milestone_cover" : "field_cover", List.of("legacy", "rear"), BreachCapability.NONE, null));
+			if (escort > 0) {
+				groups.add(new SiegeUnitGroup(definition.id() + "_escort", "escort_shell", "minecraft:vindicator", "breacher", escort, definition.ageDefining() ? "milestone_break" : "field_break", List.of("legacy", "escort"), BreachCapability.NONE, null));
+			}
+			return List.copyOf(groups);
+		}
+
+		private static String legacyFormation(SiegeDefinition definition) {
+			if (definition.ageDefining()) {
+				return "milestone";
+			}
+			if (definition.ramCount() > 0) {
+				return "ram_push";
+			}
+			return switch (definition.ageLevel()) {
+				case 0 -> "line";
+				case 1 -> "wedge";
+				case 2 -> "shell";
+				default -> "column";
+			};
+		}
+
+		private static SiegeDefinition resolveInternal(SiegeCampaignNode node, SiegeBattleTemplate template, SiegeBaseState state) {
+			SiegeBattleVariant variant = resolveVariant(node, template, state);
+			String displayName = node.displayName();
+			String description = node.description();
+			String enemySummary = template == null ? "Unknown" : template.enemySummary();
+			String weaponSummary = template == null ? "Unknown" : template.weaponSummary();
+			String threatSummary = template == null ? "Unknown" : template.threatSummary();
+			int combatTier = template == null ? Math.max(0, node.ageLevel()) : template.difficultyTier();
+			int waveSize = template == null ? 0 : template.baseWaveSize();
+			int ramCount = template == null ? 0 : template.baseRamCount();
+			if (variant != null) {
+				displayName = node.displayName() + ": " + variant.displayName();
+				description = variant.description();
+				enemySummary = pickSummary(variant.enemySummary(), template.enemySummary());
+				weaponSummary = pickSummary(variant.weaponSummary(), template.weaponSummary());
+				threatSummary = pickSummary(variant.threatSummary(), template.threatSummary());
+				waveSize = Math.max(0, waveSize + variant.waveDelta());
+				ramCount = Math.max(0, ramCount + variant.ramDelta());
+				combatTier = Math.max(0, combatTier + variant.difficultyDelta());
+			}
+			return new SiegeDefinition(
+				node.id(),
+				displayName,
+				description,
+				node.ageLevel(),
+				node.routeColumn(),
+				node.ageDefining(),
+				node.requiredRegularWins(),
+				node.routeRow(),
+				combatTier,
+				waveSize,
+				ramCount,
+				enemySummary,
+				weaponSummary,
+				threatSummary,
+				node.warSuppliesReward(),
+				node.minorRaid()
+			);
+		}
+
+		private static SiegeBattleVariant resolveVariant(SiegeCampaignNode node, SiegeBattleTemplate template, SiegeBaseState state) {
+			if (node == null || template == null || state == null || !node.minorRaid()) {
+				return null;
+			}
+			List<SiegeBattleVariant> variants = template.variants().isEmpty() ? DEFAULT_MINOR_RAID_VARIANTS : template.variants();
+			if (variants.isEmpty()) {
+				return null;
+			}
+			int seed = state.getCompletedSieges() + node.routeColumn() + (state.getCurrentAgeRegularWins() * 2);
+			int index = Math.floorMod(seed, variants.size());
+			return variants.get(index);
+		}
+
+		private static void validateTemplate(SiegeBattleTemplate template, List<String> errors) {
+			if (template.id() == null || template.id().isBlank()) {
+				errors.add("Battle template has a blank id.");
+			}
+			if (template.spawnTier() < 0) {
+				errors.add("Battle template '" + template.id() + "' has negative spawnTier.");
+			}
+			if (template.difficultyTier() < 0) {
+				errors.add("Battle template '" + template.id() + "' has negative difficultyTier.");
+			}
+			if (template.baseWaveSize() < 0) {
+				errors.add("Battle template '" + template.id() + "' has negative baseWaveSize.");
+			}
+			if (template.baseRamCount() < 0) {
+				errors.add("Battle template '" + template.id() + "' has negative baseRamCount.");
+			}
+			if (template.formationId() == null || template.formationId().isBlank()) {
+				errors.add("Battle template '" + template.id() + "' has a blank formationId.");
+			} else if (!BattleFormationCatalog.hasDefinition(template.formationId())) {
+				errors.add("Battle template '" + template.id() + "' references missing formation '" + template.formationId() + "'.");
+			}
+			for (SiegeUnitGroup group : template.unitGroups()) {
+				if (group.id() == null || group.id().isBlank()) {
+					errors.add("Battle template '" + template.id() + "' has a unit group with a blank id.");
+				}
+				if (group.unitType() == null || group.unitType().isBlank()) {
+					errors.add("Battle template '" + template.id() + "' has unit group '" + group.id() + "' with a blank unitType.");
+				}
+				BattleUnitDefinition definition = BattleUnitCatalog.definition(group.unitType());
+				if (definition == null) {
+					errors.add("Battle template '" + template.id() + "' references missing unitType '" + group.unitType() + "' in group '" + group.id() + "'.");
+				} else if (definition.spawnTier() > template.spawnTier()) {
+					errors.add("Battle template '" + template.id() + "' spawnTier " + template.spawnTier() + " is lower than required by unit '" + group.unitType() + "' (" + definition.spawnTier() + ").");
+				}
+				if (group.count() < 0) {
+					errors.add("Battle template '" + template.id() + "' has a unit group with negative count: " + group.id());
+				}
+				if (group.wallDamage() != null && group.wallDamage() < 0) {
+					errors.add("Battle template '" + template.id() + "' has unit group '" + group.id() + "' with negative wallDamage.");
+				}
+			}
+			for (SiegeEngineGroup group : template.engineGroups()) {
+				if (group.id() == null || group.id().isBlank()) {
+					errors.add("Battle template '" + template.id() + "' has an engine group with a blank id.");
+				}
+				if (group.engineType() == null || group.engineType().isBlank()) {
+					errors.add("Battle template '" + template.id() + "' has engine group '" + group.id() + "' with a blank engineType.");
+				}
+				BattleUnitDefinition definition = BattleUnitCatalog.definition(group.engineType());
+				if (definition == null) {
+					errors.add("Battle template '" + template.id() + "' references missing engineType '" + group.engineType() + "' in group '" + group.id() + "'.");
+				} else {
+					if (!definition.isEngine()) {
+						errors.add("Battle template '" + template.id() + "' engine group '" + group.id() + "' references non-engine unit '" + group.engineType() + "'.");
+					}
+					if (definition.spawnTier() > template.spawnTier()) {
+						errors.add("Battle template '" + template.id() + "' spawnTier " + template.spawnTier() + " is lower than required by engine '" + group.engineType() + "' (" + definition.spawnTier() + ").");
+					}
+				}
+				if (group.count() < 0) {
+					errors.add("Battle template '" + template.id() + "' has an engine group with negative count: " + group.id());
+				}
+			}
+			for (SiegeBattleVariant variant : template.variants()) {
+				if (variant.id() == null || variant.id().isBlank()) {
+					errors.add("Battle template '" + template.id() + "' has a variant with a blank id.");
+				}
+				if (template.baseWaveSize() + variant.waveDelta() < 0) {
+					errors.add("Battle template '" + template.id() + "' variant '" + variant.id() + "' would create a negative wave size.");
+				}
+				if (template.baseRamCount() + variant.ramDelta() < 0) {
+					errors.add("Battle template '" + template.id() + "' variant '" + variant.id() + "' would create a negative engine count.");
+				}
+			}
+			boolean hasPrimaryBreachPath = false;
+			boolean hasFallbackBreachPath = false;
+			boolean hasEngineBreachPath = false;
+			for (SiegeUnitGroup group : template.unitGroups()) {
+				if (group.count() <= 0) {
+					continue;
+				}
+				BattleUnitDefinition definition = BattleUnitCatalog.definition(group.unitType());
+				BreachCapability capability = group.breachCapability() == BreachCapability.NONE
+					? definition == null ? BreachCapability.NONE : definition.breachCapability()
+					: group.breachCapability();
+				if (capability == BreachCapability.PRIMARY) {
+					hasPrimaryBreachPath = true;
+				} else if (capability == BreachCapability.FALLBACK) {
+					hasFallbackBreachPath = true;
+				}
+			}
+			for (SiegeEngineGroup group : template.engineGroups()) {
+				if (group.count() <= 0) {
+					continue;
+				}
+				BattleUnitDefinition definition = BattleUnitCatalog.definition(group.engineType());
+				if (definition != null && definition.isEngine()) {
+					hasEngineBreachPath = true;
+					break;
+				}
+			}
+			if (!hasPrimaryBreachPath && !hasFallbackBreachPath && !hasEngineBreachPath) {
+				errors.add("Battle template '" + template.id() + "' has no authored breach path. Add a primary breacher, fallback-capable unit, or siege engine.");
+			}
+		}
+
+		private static void validateNode(SiegeCampaignNode node, List<String> errors) {
+			if (node.id() == null || node.id().isBlank()) {
+				errors.add("Campaign node has a blank id.");
+			}
+			if (node.displayName() == null || node.displayName().isBlank()) {
+				errors.add("Campaign node '" + node.id() + "' has a blank displayName.");
+			}
+			if (node.description() == null || node.description().isBlank()) {
+				errors.add("Campaign node '" + node.id() + "' has a blank description.");
+			}
+			if (node.ageLevel() < 0) {
+				errors.add("Campaign node '" + node.id() + "' has a negative ageLevel.");
+			}
+			if (node.routeColumn() < 0) {
+				errors.add("Campaign node '" + node.id() + "' has a negative routeColumn.");
+			}
+			if (node.routeRow() < 0) {
+				errors.add("Campaign node '" + node.id() + "' has a negative routeRow.");
+			}
+			if (node.requiredRegularWins() < 0) {
+				errors.add("Campaign node '" + node.id() + "' has a negative requiredRegularWins.");
+			}
+			if (node.warSuppliesReward() < 0) {
+				errors.add("Campaign node '" + node.id() + "' has a negative warSuppliesReward.");
+			}
+			if (node.battleTemplateId() == null || node.battleTemplateId().isBlank()) {
+				errors.add("Campaign node '" + node.id() + "' has a blank battleTemplateId.");
+			}
+		}
+
+		private static String pickSummary(String variantValue, String fallback) {
+			return variantValue == null || variantValue.isBlank() ? fallback : variantValue;
+		}
+
+		private static <T> List<T> safeList(List<T> values) {
+			return values == null ? List.of() : values;
+		}
+
+		private static String normalizeId(String id) {
+			return id == null ? null : id.trim();
+		}
+
+		private static String formatErrors(List<String> errors) {
+			StringBuilder builder = new StringBuilder("Siege config validation failed:");
+			for (String error : errors) {
+				builder.append('\n').append(" - ").append(error);
+			}
+			return builder.toString();
+		}
+	}
+
 	private static final class SiegeConfigRoot {
+		Integer schemaVersion;
 		String note;
+		List<SiegeCampaignNodeJson> campaignNodes = List.of();
+		List<SiegeBattleTemplateJson> battleTemplates = List.of();
 		List<SiegeDefinitionJson> sieges = List.of();
+
+		boolean hasAnyCampaignData() {
+			return (campaignNodes != null && !campaignNodes.isEmpty()) || (battleTemplates != null && !battleTemplates.isEmpty());
+		}
+	}
+
+	private static final class SiegeCampaignNodeJson {
+		String id;
+		String displayName;
+		String description;
+		int ageLevel;
+		int routeColumn;
+		int routeRow;
+		boolean ageDefining;
+		int requiredRegularWins;
+		String battleTemplateId;
+		int warSuppliesReward;
+		boolean minorRaid;
+
+		private SiegeCampaignNode toNode() {
+			return new SiegeCampaignNode(
+				id,
+				displayName,
+				description,
+				ageLevel,
+				routeColumn,
+				routeRow,
+				ageDefining,
+				requiredRegularWins,
+				battleTemplateId,
+				warSuppliesReward,
+				minorRaid
+			);
+		}
+
+		private static SiegeCampaignNodeJson fromNode(SiegeCampaignNode node) {
+			SiegeCampaignNodeJson json = new SiegeCampaignNodeJson();
+			json.id = node.id();
+			json.displayName = node.displayName();
+			json.description = node.description();
+			json.ageLevel = node.ageLevel();
+			json.routeColumn = node.routeColumn();
+			json.routeRow = node.routeRow();
+			json.ageDefining = node.ageDefining();
+			json.requiredRegularWins = node.requiredRegularWins();
+			json.battleTemplateId = node.battleTemplateId();
+			json.warSuppliesReward = node.warSuppliesReward();
+			json.minorRaid = node.minorRaid();
+			return json;
+		}
+	}
+
+	private static final class SiegeBattleTemplateJson {
+		String id;
+		int spawnTier;
+		int difficultyTier;
+		int baseWaveSize;
+		int baseRamCount;
+		String formationId;
+		String enemySummary;
+		String weaponSummary;
+		String threatSummary;
+		List<SiegeUnitGroupJson> unitGroups = List.of();
+		List<SiegeEngineGroupJson> engineGroups = List.of();
+		List<SiegeBattleVariantJson> variants = List.of();
+
+		private SiegeBattleTemplate toTemplate() {
+			List<SiegeUnitGroup> convertedUnits = new ArrayList<>();
+			for (SiegeUnitGroupJson json : CatalogState.safeList(unitGroups)) {
+				convertedUnits.add(json.toGroup());
+			}
+			List<SiegeEngineGroup> convertedEngines = new ArrayList<>();
+			for (SiegeEngineGroupJson json : CatalogState.safeList(engineGroups)) {
+				convertedEngines.add(json.toGroup());
+			}
+			List<SiegeBattleVariant> convertedVariants = new ArrayList<>();
+			for (SiegeBattleVariantJson json : CatalogState.safeList(variants)) {
+				convertedVariants.add(json.toVariant());
+			}
+			return new SiegeBattleTemplate(
+				id,
+				spawnTier,
+				difficultyTier,
+				baseWaveSize,
+				baseRamCount,
+				formationId,
+				enemySummary,
+				weaponSummary,
+				threatSummary,
+				convertedUnits,
+				convertedEngines,
+				convertedVariants
+			);
+		}
+
+		private static SiegeBattleTemplateJson fromTemplate(SiegeBattleTemplate template) {
+			SiegeBattleTemplateJson json = new SiegeBattleTemplateJson();
+			json.id = template.id();
+			json.spawnTier = template.spawnTier();
+			json.difficultyTier = template.difficultyTier();
+			json.baseWaveSize = template.baseWaveSize();
+			json.baseRamCount = template.baseRamCount();
+			json.formationId = template.formationId();
+			json.enemySummary = template.enemySummary();
+			json.weaponSummary = template.weaponSummary();
+			json.threatSummary = template.threatSummary();
+			List<SiegeUnitGroupJson> unitGroups = new ArrayList<>();
+			for (SiegeUnitGroup group : template.unitGroups()) {
+				unitGroups.add(SiegeUnitGroupJson.fromGroup(group));
+			}
+			json.unitGroups = List.copyOf(unitGroups);
+			List<SiegeEngineGroupJson> engineGroups = new ArrayList<>();
+			for (SiegeEngineGroup group : template.engineGroups()) {
+				engineGroups.add(SiegeEngineGroupJson.fromGroup(group));
+			}
+			json.engineGroups = List.copyOf(engineGroups);
+			List<SiegeBattleVariantJson> variants = new ArrayList<>();
+			for (SiegeBattleVariant variant : template.variants()) {
+				variants.add(SiegeBattleVariantJson.fromVariant(variant));
+			}
+			json.variants = List.copyOf(variants);
+			return json;
+		}
+	}
+
+	private static final class SiegeBattleVariantJson {
+		String id;
+		String displayName;
+		String description;
+		int waveDelta;
+		int ramDelta;
+		int difficultyDelta;
+		String enemySummary;
+		String weaponSummary;
+		String threatSummary;
+
+		private SiegeBattleVariant toVariant() {
+			return new SiegeBattleVariant(
+				id,
+				displayName,
+				description,
+				waveDelta,
+				ramDelta,
+				difficultyDelta,
+				enemySummary,
+				weaponSummary,
+				threatSummary
+			);
+		}
+
+		private static SiegeBattleVariantJson fromVariant(SiegeBattleVariant variant) {
+			SiegeBattleVariantJson json = new SiegeBattleVariantJson();
+			json.id = variant.id();
+			json.displayName = variant.displayName();
+			json.description = variant.description();
+			json.waveDelta = variant.waveDelta();
+			json.ramDelta = variant.ramDelta();
+			json.difficultyDelta = variant.difficultyDelta();
+			json.enemySummary = variant.enemySummary();
+			json.weaponSummary = variant.weaponSummary();
+			json.threatSummary = variant.threatSummary();
+			return json;
+		}
+	}
+
+	private static final class SiegeUnitGroupJson {
+		String id;
+		String unitType;
+		String entityType;
+		String role;
+		int count;
+		String loadout;
+		List<String> tags = List.of();
+		String breachCapability;
+		Integer wallDamage;
+
+		private SiegeUnitGroup toGroup() {
+			return new SiegeUnitGroup(id, unitType, entityType, role, count, loadout, tags, BreachCapability.parse(breachCapability), wallDamage);
+		}
+
+		private static SiegeUnitGroupJson fromGroup(SiegeUnitGroup group) {
+			SiegeUnitGroupJson json = new SiegeUnitGroupJson();
+			json.id = group.id();
+			json.unitType = group.unitType();
+			json.entityType = group.entityType();
+			json.role = group.role();
+			json.count = group.count();
+			json.loadout = group.loadout();
+			json.tags = group.tags();
+			json.breachCapability = group.breachCapability().name().toLowerCase();
+			json.wallDamage = group.wallDamage();
+			return json;
+		}
+	}
+
+	private static final class SiegeEngineGroupJson {
+		String id;
+		String engineType;
+		String entityType;
+		int count;
+		List<String> tags = List.of();
+
+		private SiegeEngineGroup toGroup() {
+			return new SiegeEngineGroup(id, engineType, entityType, count, tags);
+		}
+
+		private static SiegeEngineGroupJson fromGroup(SiegeEngineGroup group) {
+			SiegeEngineGroupJson json = new SiegeEngineGroupJson();
+			json.id = group.id();
+			json.engineType = group.engineType();
+			json.entityType = group.entityType();
+			json.count = group.count();
+			json.tags = group.tags();
+			return json;
+		}
 	}
 
 	private static final class SiegeDefinitionJson {

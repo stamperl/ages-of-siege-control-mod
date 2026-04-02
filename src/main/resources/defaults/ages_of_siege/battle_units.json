@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 2,
+  "note": "Reusable battle unit definitions. Battle templates should reference these by id and only override entityType/role/loadout when needed.",
+  "units": [
+    {
+      "id": "adaptive_front",
+      "displayName": "Adaptive Front Raider",
+      "entityType": "minecraft:pillager",
+      "defaultRole": "ranged",
+      "loadoutProfile": "field_line",
+      "tags": ["frontline", "ranged"],
+      "spawnTier": 0,
+      "breachCapability": "fallback",
+      "wallDamage": 1
+    },
+    {
+      "id": "front_line",
+      "displayName": "Main Assault Line",
+      "entityType": "minecraft:pillager",
+      "defaultRole": "ranged",
+      "loadoutProfile": "milestone_line",
+      "tags": ["frontline", "ranged"],
+      "spawnTier": 0,
+      "breachCapability": "fallback",
+      "wallDamage": 1
+    },
+    {
+      "id": "escort_shell",
+      "displayName": "Escort Shell",
+      "entityType": "minecraft:pillager",
+      "defaultRole": "escort",
+      "loadoutProfile": "field_cover",
+      "tags": ["escort", "center"],
+      "spawnTier": 0,
+      "breachCapability": "fallback",
+      "wallDamage": 1
+    },
+    {
+      "id": "rear_support",
+      "displayName": "Rear Support",
+      "entityType": "minecraft:pillager",
+      "defaultRole": "ranged",
+      "loadoutProfile": "field_cover",
+      "tags": ["rear", "ranged", "support"],
+      "spawnTier": 0,
+      "breachCapability": "fallback",
+      "wallDamage": 1
+    },
+    {
+      "id": "adaptive_rear",
+      "displayName": "Adaptive Rear Support",
+      "entityType": "minecraft:pillager",
+      "defaultRole": "ranged",
+      "loadoutProfile": "field_cover",
+      "tags": ["rear", "ranged", "adaptive"],
+      "spawnTier": 0,
+      "breachCapability": "fallback",
+      "wallDamage": 1
+    },
+    {
+      "id": "light_breacher",
+      "displayName": "Light Breacher",
+      "entityType": "minecraft:vindicator",
+      "defaultRole": "breacher",
+      "loadoutProfile": "field_break",
+      "tags": ["breacher", "front"],
+      "spawnTier": 0,
+      "breachCapability": "primary",
+      "wallDamage": 2
+    },
+    {
+      "id": "heavy_breacher",
+      "displayName": "Heavy Breacher",
+      "entityType": "minecraft:vindicator",
+      "defaultRole": "breacher",
+      "loadoutProfile": "milestone_break",
+      "tags": ["breacher", "front", "heavy"],
+      "spawnTier": 1,
+      "breachCapability": "primary",
+      "wallDamage": 2
+    },
+    {
+      "id": "ram",
+      "displayName": "Battering Ram",
+      "entityType": "ages_of_siege:ram",
+      "defaultRole": "ram",
+      "loadoutProfile": "",
+      "tags": ["engine", "siege", "ram"],
+      "spawnTier": 1,
+      "breachCapability": "primary",
+      "wallDamage": 0
+    }
+  ]
+}

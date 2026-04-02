@@ -1,9 +1,11 @@
 package com.stamperl.agesofsiege.ledger;
 
 import com.stamperl.agesofsiege.AgesOfSiegeMod;
+import com.stamperl.agesofsiege.AntiqueAtlasCompat;
 import com.stamperl.agesofsiege.defense.DefenderRole;
 import com.stamperl.agesofsiege.item.ModItems;
 import com.stamperl.agesofsiege.siege.SiegeCatalog;
+import com.stamperl.agesofsiege.siege.runtime.UnitRole;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.block.BlockState;
@@ -39,6 +41,8 @@ public class ArmyLedgerScreen extends Screen {
 	private static final int SCREEN_MARGIN_Y = 22;
 	private static final int PANEL_GAP = 14;
 	private static final int PANEL_HEADER_HEIGHT = 40;
+	private static final int SIEGE_BUTTON_FOOTER_GAP = 10;
+	private static final int SIEGE_BUTTON_FOOTER_HEIGHT = 132;
 	private static final int DETAIL_PANEL_WIDTH_MIN = 360;
 	private static final int DETAIL_PANEL_WIDTH_MAX = 440;
 	private static final int MAX_FRAME_WIDTH = 1400;
@@ -73,13 +77,19 @@ public class ArmyLedgerScreen extends Screen {
 	private static final int TEXT_MUTED = 0xFF76818A;
 	private static final int TEXT_WARM = 0xFFD6C49E;
 	private static final int MAP_BG = 0xFF20372A;
-	private static final int MAP_GRID = 0x183A4753;
+	private static final int MAP_GRID_MINOR = 0x103A4753;
+	private static final int MAP_GRID_MAJOR = 0x244A5A67;
+	private static final int MAP_CONTOUR_LIGHT = 0x2ED8E3EA;
+	private static final int MAP_CONTOUR_DARK = 0x2A11181E;
 	private static final int MARKER_ARCHER = 0xFF5F83A8;
 	private static final int MARKER_SOLDIER = 0xFFC7B88F;
 	private static final int MARKER_SELECTED = 0xFFAD5548;
 	private static final int MARKER_OFFLINE = 0xFF6E7177;
 	private static final int MARKER_POST = 0x80FFFFFF;
 	private static final int MARKER_BANNER = 0xFFB89B54;
+	private static final int MARKER_RALLY = 0xFFD05E56;
+	private static final int MARKER_ATTACKER = 0xFFD8B86E;
+	private static final int MARKER_ATTACKER_BG = 0xD0151A1F;
 	private static final int SAMPLE_NATURAL = 0;
 	private static final int SAMPLE_PATH = 1;
 	private static final int SAMPLE_WOOD = 2;
@@ -110,6 +120,9 @@ public class ArmyLedgerScreen extends Screen {
 	private MapView cachedMapBounds;
 	private int[] cachedMapColors = new int[0];
 	private byte[] cachedMapKinds = new byte[0];
+	private int[] cachedMapHeights = new int[0];
+	private int cachedMapOriginX;
+	private int cachedMapOriginZ;
 	private int cachedSamplesX = -1;
 	private int cachedSamplesZ = -1;
 	private long cachedMapTick = Long.MIN_VALUE;
@@ -170,7 +183,7 @@ public class ArmyLedgerScreen extends Screen {
 			.dimensions(0, 0, 90, 20).build());
 		this.cycleRoleButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Cycle Role"), button -> sendRoleCycle())
 			.dimensions(0, 0, 90, 20).build());
-		this.locateButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Locate"), button -> sendLocate())
+		this.locateButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Open Tactical Atlas"), button -> openAtlas())
 			.dimensions(0, 0, 90, 20).build());
 		this.defendersTabButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Defenders"), button -> setLedgerMode(LedgerMode.DEFENDERS))
 			.dimensions(0, 0, 88, 20).build());
@@ -308,7 +321,6 @@ public class ArmyLedgerScreen extends Screen {
 		mapPanZ -= (float) ((ledgerMouseY - mapDragLastY) * worldPerPixelZ);
 		mapDragLastX = ledgerMouseX;
 		mapDragLastY = ledgerMouseY;
-		invalidateMapCache();
 		return true;
 	}
 
@@ -357,8 +369,6 @@ public class ArmyLedgerScreen extends Screen {
 		float baseCenterX = (baseBounds.minX + baseBounds.maxX) * 0.5F;
 		float baseCenterZ = (baseBounds.minZ + baseBounds.maxZ) * 0.5F;
 		float aspect = body.width / (float) Math.max(1, body.height);
-		float baseWidth = Math.max(baseBounds.maxX - baseBounds.minX, baseBounds.maxZ - baseBounds.minZ * aspect);
-		float baseHeight = Math.max(baseBounds.maxZ - baseBounds.minZ, baseWidth / Math.max(0.01F, aspect));
 		float paddedWidth = Math.max(18.0F, (baseBounds.maxX - baseBounds.minX) + 10.0F);
 		float paddedHeight = Math.max(18.0F, (baseBounds.maxZ - baseBounds.minZ) + 10.0F);
 		float viewWidth = Math.max(12.0F, Math.max(paddedWidth, paddedHeight * aspect) / mapZoom);
@@ -367,7 +377,6 @@ public class ArmyLedgerScreen extends Screen {
 		float centerZ = worldZ - ((normalizedZ - 0.5F) * viewHeight);
 		mapPanX = centerX - baseCenterX;
 		mapPanZ = centerZ - baseCenterZ;
-		invalidateMapCache();
 		return true;
 	}
 
@@ -474,27 +483,151 @@ public class ArmyLedgerScreen extends Screen {
 		int y = bar.y + ((bar.height - height) / 2);
 		return new Rect(x, y, width, height);
 	}
-
 	private void drawMapPanel(DrawContext context, Layout layout, int mouseX, int mouseY) {
 		if (ledgerMode == LedgerMode.SIEGES) {
 			drawSiegeListPanel(context, layout, mouseX, mouseY);
 			return;
 		}
+		drawEmbeddedTacticalBoard(context, layout, mouseX, mouseY);
+	}
+
+	private void drawEmbeddedTacticalBoard(DrawContext context, Layout layout, int mouseX, int mouseY) {
 		Rect panel = layout.mapPanel;
 		Rect body = layout.mapBody;
 		context.fill(panel.x, panel.y, panel.right(), panel.bottom(), PANEL_COLOR);
 		context.drawBorder(panel.x, panel.y, panel.width, panel.height, PANEL_BORDER);
 		context.fill(panel.x, panel.y, panel.right(), panel.y + PANEL_HEADER_HEIGHT, PANEL_HEADER_COLOR);
 		context.fill(panel.x + 12, panel.y + PANEL_HEADER_HEIGHT, panel.right() - 12, panel.y + PANEL_HEADER_HEIGHT + 1, CARD_BORDER);
-		drawTrimmed(context, "Tactical Map", panel.x + 14, panel.y + 13, 160, TEXT_PRIMARY);
+		drawTrimmed(context, "Tactical Board", panel.x + 14, panel.y + 13, 180, TEXT_PRIMARY);
 		if (layout.density != LayoutDensity.COMPACT) {
 			drawScaledText(context, String.format("Zoom %.2fx  •  Wheel to zoom  •  Drag to pan", mapZoom), panel.right() - 250, panel.y + 15, TEXT_SECONDARY, metaScale(layout.density));
 		}
 
-		drawTerrainMap(context, body);
+		context.fill(body.x, body.y, body.right(), body.bottom(), 0xFF253A29);
+		context.drawBorder(body.x, body.y, body.width, body.height, PANEL_BORDER);
 		drawMapGrid(context, body);
+		drawTacticalFootprint(context, body);
 		drawBannerAndPosts(context, body);
+		drawAttackerMarkers(context, body);
 		drawGuardMarkers(context, body, mouseX, mouseY);
+	}
+
+	private void drawTacticalFootprint(DrawContext context, Rect body) {
+		MapView bounds = computeMapView(body);
+		if (snapshot.defenders().isEmpty()) {
+			Point banner = worldToMap(snapshot.bannerPos(), body, bounds);
+			context.fill(banner.x - 18, banner.y - 18, banner.x + 18, banner.y + 18, 0x202A3321);
+			return;
+		}
+		int minX = Integer.MAX_VALUE;
+		int maxX = Integer.MIN_VALUE;
+		int minZ = Integer.MAX_VALUE;
+		int maxZ = Integer.MIN_VALUE;
+		for (ArmyLedgerSnapshot.DefenderEntry defender : snapshot.defenders()) {
+			minX = Math.min(minX, defender.homePost().getX());
+			maxX = Math.max(maxX, defender.homePost().getX());
+			minZ = Math.min(minZ, defender.homePost().getZ());
+			maxZ = Math.max(maxZ, defender.homePost().getZ());
+		}
+		int x0 = worldToMapX(minX - 0.5F, body, bounds);
+		int x1 = worldToMapX(maxX + 1.5F, body, bounds);
+		int y0 = worldToMapY(minZ - 0.5F, body, bounds);
+		int y1 = worldToMapY(maxZ + 1.5F, body, bounds);
+		context.fill(x0, y0, x1, y1, 0x1E9FBC4A);
+		context.fill(x0 + 1, y0 + 1, x1 - 1, y1 - 1, 0x1824351A);
+		int wall = Math.max(2, Math.min(8, Math.round((x1 - x0) / Math.max(6.0F, maxX - minX + 2.0F))));
+		context.fill(x0, y0, x1, y0 + wall, 0xFFAA8249);
+		context.fill(x0, y1 - wall, x1, y1, 0xFFAA8249);
+		context.fill(x0, y0, x0 + wall, y1, 0xFFAA8249);
+		context.fill(x1 - wall, y0, x1, y1, 0xFFAA8249);
+		context.drawBorder(x0, y0, x1 - x0, y1 - y0, 0x70463318);
+	}
+	private void drawAtlasLaunchPanel(DrawContext context, Layout layout) {
+		Rect panel = layout.mapPanel;
+		Rect body = layout.mapBody;
+		context.fill(panel.x, panel.y, panel.right(), panel.bottom(), PANEL_COLOR);
+		context.drawBorder(panel.x, panel.y, panel.width, panel.height, PANEL_BORDER);
+		context.fill(panel.x, panel.y, panel.right(), panel.y + PANEL_HEADER_HEIGHT, PANEL_HEADER_COLOR);
+		context.fill(panel.x + 12, panel.y + PANEL_HEADER_HEIGHT, panel.right() - 12, panel.y + PANEL_HEADER_HEIGHT + 1, CARD_BORDER);
+		drawTrimmed(context, "Tactical Atlas", panel.x + 14, panel.y + 13, 180, TEXT_PRIMARY);
+		drawTrimmed(context, "Open Antique Atlas centered on your banner or selected defender post.", panel.right() - 410, panel.y + 15, 390, TEXT_SECONDARY);
+
+		context.fill(body.x, body.y, body.right(), body.bottom(), MAP_BG);
+		context.drawBorder(body.x, body.y, body.width, body.height, PANEL_BORDER);
+
+		int inset = 18;
+		int gap = 12;
+		int leftWidth = Math.max(240, Math.min(360, body.width / 2));
+		int summaryHeight = 74;
+		Rect settlementCard = new Rect(body.x + inset, body.y + inset, leftWidth, summaryHeight);
+		Rect focusCard = new Rect(settlementCard.x, settlementCard.bottom() + gap, leftWidth, summaryHeight);
+		Rect noteCard = new Rect(settlementCard.x, focusCard.bottom() + gap, leftWidth, 92);
+		Rect launchCard = new Rect(settlementCard.x, noteCard.bottom() + gap, leftWidth, Math.max(116, body.bottom() - noteCard.bottom() - gap - inset));
+		Rect previewCard = new Rect(launchCard.right() + gap, body.y + inset, Math.max(220, body.right() - launchCard.right() - gap - inset), body.height - (inset * 2));
+
+		drawInfoCard(context, settlementCard, "Settlement", safeText(snapshot.ownerName(), "Unknown"));
+		drawInfoCard(context, focusCard, "Atlas Focus", atlasFocusSummary());
+		drawAtlasNoteCard(context, noteCard);
+		drawAtlasLaunchCard(context, launchCard);
+		drawAtlasPreviewCard(context, previewCard);
+	}
+
+	private void drawAtlasNoteCard(DrawContext context, Rect rect) {
+		context.fill(rect.x, rect.y, rect.right(), rect.bottom(), CARD_COLOR);
+		context.drawBorder(rect.x, rect.y, rect.width, rect.height, CARD_BORDER);
+		drawScaledText(context, "HOW IT WORKS", rect.x + 10, rect.y + 8, TEXT_SECONDARY, 0.72F);
+		drawWrapped(context, "Atlas handles the heavy map rendering and cache. The ledger stays focused on commands and guard controls.", rect.x + 10, rect.y + 24, rect.width - 20, TEXT_PRIMARY, 0);
+	}
+
+	private void drawAtlasLaunchCard(DrawContext context, Rect rect) {
+		context.fill(rect.x, rect.y, rect.right(), rect.bottom(), CARD_COLOR);
+		context.drawBorder(rect.x, rect.y, rect.width, rect.height, CARD_BORDER);
+		drawScaledText(context, "TACTICAL ACTION", rect.x + 10, rect.y + 8, TEXT_SECONDARY, 0.72F);
+		String availability = AntiqueAtlasCompat.isAvailable()
+			? "Atlas is installed in this instance."
+			: "Atlas is not available in this instance.";
+		drawWrapped(context, availability, rect.x + 10, rect.y + 24, rect.width - 20, AntiqueAtlasCompat.isAvailable() ? TEXT_WARM : MARKER_SELECTED, 0);
+		drawWrapped(context, "Opening Atlas will center on the selected defender post. If no guard is selected, it will center on the settlement banner.", rect.x + 10, rect.y + 44, rect.width - 20, TEXT_PRIMARY, 0);
+	}
+
+	private void drawAtlasPreviewCard(DrawContext context, Rect rect) {
+		context.fill(rect.x, rect.y, rect.right(), rect.bottom(), 0xFF11171C);
+		context.drawBorder(rect.x, rect.y, rect.width, rect.height, CARD_BORDER);
+		drawScaledText(context, "ATLAS PREVIEW", rect.x + 12, rect.y + 10, TEXT_SECONDARY, 0.72F);
+		int centerX = rect.centerX();
+		int centerY = rect.centerY() - 18;
+		int tile = Math.max(18, Math.min(28, rect.width / 10));
+		int size = tile * 6;
+		int startX = centerX - (size / 2);
+		int startY = centerY - (size / 2);
+		for (int row = 0; row < 6; row++) {
+			for (int col = 0; col < 6; col++) {
+				int x = startX + (col * tile);
+				int y = startY + (row * tile);
+				int color = (row >= 1 && row <= 4 && col >= 1 && col <= 4) ? 0xFF89B63A : 0xFF7EA92F;
+				context.fill(x, y, x + tile, y + tile, color);
+				context.drawBorder(x, y, tile, tile, 0x18202A14);
+			}
+		}
+		int wallInset = tile;
+		context.fill(startX + wallInset, startY + wallInset, startX + size - wallInset, startY + wallInset + tile, 0xFFAC8447);
+		context.fill(startX + wallInset, startY + size - wallInset - tile, startX + size - wallInset, startY + size - wallInset, 0xFFAC8447);
+		context.fill(startX + wallInset, startY + wallInset, startX + wallInset + tile, startY + size - wallInset, 0xFFAC8447);
+		context.fill(startX + size - wallInset - tile, startY + wallInset, startX + size - wallInset, startY + size - wallInset, 0xFFAC8447);
+		int postX = startX + (size / 2) - 1;
+		int postY = startY + (size / 2) - 6;
+		context.fill(postX, postY, postX + 2, postY + 12, MARKER_BANNER);
+		context.fill(postX + 2, postY, postX + 6, postY + 3, MARKER_BANNER);
+		drawScaledText(context, "Atlas provides the full terrain map and navigation tools.", rect.x + 12, rect.bottom() - 40, TEXT_PRIMARY, 0.82F);
+		drawScaledText(context, "Use the ledger for commands. Use Atlas for terrain.", rect.x + 12, rect.bottom() - 24, TEXT_SECONDARY, 0.72F);
+	}
+
+	private String atlasFocusSummary() {
+		ArmyLedgerSnapshot.DefenderEntry defender = getSelectedDefender();
+		if (defender != null) {
+			return defender.name() + "  " + defender.homePost().toShortString();
+		}
+		return "Banner " + snapshot.bannerPos().toShortString();
 	}
 
 	private void drawTerrainMap(DrawContext context, Rect body) {
@@ -508,15 +641,18 @@ public class ArmyLedgerScreen extends Screen {
 		}
 
 		for (int sampleZ = 0; sampleZ < cachedSamplesZ; sampleZ++) {
-			int y0 = body.y + Math.round(sampleZ * body.height / (float) cachedSamplesZ);
-			int y1 = body.y + Math.round((sampleZ + 1) * body.height / (float) cachedSamplesZ);
+			int worldZ = cachedMapOriginZ + sampleZ;
+			int y0 = worldToMapY(worldZ, body, bounds);
+			int y1 = worldToMapY(worldZ + 1.0F, body, bounds);
 			for (int sampleX = 0; sampleX < cachedSamplesX; sampleX++) {
-				int x0 = body.x + Math.round(sampleX * body.width / (float) cachedSamplesX);
-				int x1 = body.x + Math.round((sampleX + 1) * body.width / (float) cachedSamplesX);
+				int worldX = cachedMapOriginX + sampleX;
+				int x0 = worldToMapX(worldX, body, bounds);
+				int x1 = worldToMapX(worldX + 1.0F, body, bounds);
 				int index = sampleZ * cachedSamplesX + sampleX;
 				context.fill(x0, y0, x1, y1, cachedMapColors[index]);
 				if (x1 - x0 > 2 && y1 - y0 > 2) {
 					drawFeatureEdge(context, x0, y0, x1, y1, sampleX, sampleZ, index);
+					drawContourEdge(context, x0, y0, x1, y1, sampleX, sampleZ, index);
 				}
 			}
 		}
@@ -528,13 +664,13 @@ public class ArmyLedgerScreen extends Screen {
 			return;
 		}
 		int edgeColor = switch (kind) {
-			case SAMPLE_PATH -> 0x505A4426;
-			case SAMPLE_WOOD -> 0x6050321D;
-			case SAMPLE_STONE -> 0x60656A70;
-			case SAMPLE_WATER -> 0x50536F9A;
-			case SAMPLE_SAND -> 0x50A58F59;
-			case SAMPLE_CROP -> 0x50578E2E;
-			default -> 0x4036404B;
+			case SAMPLE_PATH -> 0x80584024;
+			case SAMPLE_WOOD -> 0x904C3119;
+			case SAMPLE_STONE -> 0x90656A70;
+			case SAMPLE_WATER -> 0x70536F9A;
+			case SAMPLE_SAND -> 0x70A58F59;
+			case SAMPLE_CROP -> 0x70578E2E;
+			default -> 0x5036404B;
 		};
 		if (sampleX == 0 || cachedMapKinds[index - 1] != kind) {
 			context.fill(x0, y0, x0 + 1, y1, edgeColor);
@@ -550,12 +686,91 @@ public class ArmyLedgerScreen extends Screen {
 		}
 	}
 
-	private void drawMapGrid(DrawContext context, Rect body) {
-		for (int x = body.x + 40; x < body.right(); x += 48) {
-			context.fill(x, body.y, x + 1, body.bottom(), MAP_GRID);
+	private void drawContourEdge(DrawContext context, int x0, int y0, int x1, int y1, int sampleX, int sampleZ, int index) {
+		byte kind = cachedMapKinds[index];
+		if (kind != SAMPLE_STONE && kind != SAMPLE_WOOD && kind != SAMPLE_PATH) {
+			return;
 		}
-		for (int y = body.y + 40; y < body.bottom(); y += 48) {
-			context.fill(body.x, y, body.right(), y + 1, MAP_GRID);
+		int height = cachedMapHeights[index];
+		if (sampleX < cachedSamplesX - 1) {
+			int eastDelta = cachedMapHeights[index + 1] - height;
+			if (eastDelta >= 3) {
+				context.fill(x1 - 1, y0, x1, y1, MAP_CONTOUR_DARK);
+			} else if (eastDelta <= -3) {
+				context.fill(x1 - 1, y0, x1, y1, MAP_CONTOUR_LIGHT);
+			}
+		}
+		if (sampleZ < cachedSamplesZ - 1) {
+			int southDelta = cachedMapHeights[index + cachedSamplesX] - height;
+			if (southDelta >= 3) {
+				context.fill(x0, y1 - 1, x1, y1, MAP_CONTOUR_DARK);
+			} else if (southDelta <= -3) {
+				context.fill(x0, y1 - 1, x1, y1, MAP_CONTOUR_LIGHT);
+			}
+		}
+	}
+
+	private void drawBannerMarker(DrawContext context, Point point, int color, boolean rally) {
+		int boxLeft = point.x - 7;
+		int boxTop = point.y - 7;
+		context.fill(boxLeft + 1, boxTop + 1, boxLeft + 15, boxTop + 15, 0x70090C10);
+		context.fill(boxLeft, boxTop, boxLeft + 14, boxTop + 14, 0xD0141A20);
+		context.drawBorder(boxLeft, boxTop, 14, 14, color);
+		context.fill(point.x - 1, point.y - 5, point.x + 1, point.y + 5, color);
+		context.fill(point.x + 1, point.y - 5, point.x + 6, point.y - 1, color);
+		if (rally) {
+			context.fill(point.x - 4, point.y + 4, point.x + 5, point.y + 5, color);
+		}
+	}
+
+	private void drawAttackerSymbol(DrawContext context, int centerX, int centerY, ArmyLedgerSnapshot.AttackerEntry attacker) {
+		if (attacker.engine() || attacker.role() == UnitRole.RAM) {
+			drawRamMarker(context, centerX, centerY, MARKER_ATTACKER);
+			return;
+		}
+		if (attacker.role() == UnitRole.RANGED) {
+			drawBowMarker(context, centerX, centerY, MARKER_ATTACKER);
+			return;
+		}
+		drawSwordMarker(context, centerX, centerY, MARKER_ATTACKER);
+	}
+
+	private void drawRamMarker(DrawContext context, int centerX, int centerY, int color) {
+		context.fill(centerX - 4, centerY - 2, centerX + 4, centerY + 3, color);
+		context.fill(centerX - 5, centerY - 1, centerX - 4, centerY + 2, color);
+		context.fill(centerX + 4, centerY - 1, centerX + 5, centerY + 2, color);
+		context.fill(centerX - 2, centerY + 3, centerX - 1, centerY + 5, color);
+		context.fill(centerX + 1, centerY + 3, centerX + 2, centerY + 5, color);
+	}
+
+	private void drawMapGrid(DrawContext context, Rect body) {
+		MapView bounds = computeMapView(body);
+		drawMapGridLines(context, body, bounds, 8, MAP_GRID_MINOR);
+		drawMapGridLines(context, body, bounds, 16, MAP_GRID_MAJOR);
+	}
+
+	private void drawMapGridLines(DrawContext context, Rect body, MapView bounds, int spacing, int color) {
+		if (spacing <= 0) {
+			return;
+		}
+		int minGridX = MathHelper.floor(bounds.minX / spacing) * spacing;
+		int maxGridX = MathHelper.ceil(bounds.maxX / spacing) * spacing;
+		for (int worldX = minGridX; worldX <= maxGridX; worldX += spacing) {
+			float normalizedX = (worldX - bounds.minX) / Math.max(1.0F, bounds.maxX - bounds.minX);
+			int screenX = body.x + Math.round(normalizedX * body.width);
+			if (screenX > body.x && screenX < body.right()) {
+				context.fill(screenX, body.y, screenX + 1, body.bottom(), color);
+			}
+		}
+
+		int minGridZ = MathHelper.floor(bounds.minZ / spacing) * spacing;
+		int maxGridZ = MathHelper.ceil(bounds.maxZ / spacing) * spacing;
+		for (int worldZ = minGridZ; worldZ <= maxGridZ; worldZ += spacing) {
+			float normalizedZ = (worldZ - bounds.minZ) / Math.max(1.0F, bounds.maxZ - bounds.minZ);
+			int screenY = body.y + Math.round(normalizedZ * body.height);
+			if (screenY > body.y && screenY < body.bottom()) {
+				context.fill(body.x, screenY, body.right(), screenY + 1, color);
+			}
 		}
 	}
 
@@ -563,12 +778,33 @@ public class ArmyLedgerScreen extends Screen {
 		MapView bounds = computeMapView(body);
 		for (ArmyLedgerSnapshot.DefenderEntry defender : snapshot.defenders()) {
 			Point post = worldToMap(defender.homePost(), body, bounds);
+			drawDiamond(context, post.x - 7, post.y - 7, 14, 0x80202830);
 			drawDiamond(context, post.x - 6, post.y - 6, 12, MARKER_POST);
 		}
 
-		Point banner = worldToMap(snapshot.bannerPos(), body, bounds);
-		context.fill(banner.x - 2, banner.y - 8, banner.x + 1, banner.y + 8, MARKER_BANNER);
-		context.fill(banner.x + 1, banner.y - 8, banner.x + 10, banner.y - 3, MARKER_BANNER);
+		drawBannerMarker(context, worldToMap(snapshot.bannerPos(), body, bounds), MARKER_BANNER, false);
+		if (snapshot.hasRally()) {
+			drawBannerMarker(context, worldToMap(snapshot.rallyPos(), body, bounds), MARKER_RALLY, true);
+		}
+	}
+
+	private void drawAttackerMarkers(DrawContext context, Rect body) {
+		if (snapshot.attackers().isEmpty()) {
+			return;
+		}
+		MapView bounds = computeMapView(body);
+		for (ArmyLedgerSnapshot.AttackerEntry attacker : snapshot.attackers()) {
+			if (!attacker.online()) {
+				continue;
+			}
+			Point point = worldToMap(attacker.currentPos(), body, bounds);
+			int boxLeft = point.x - 7;
+			int boxTop = point.y - 7;
+			context.fill(boxLeft + 1, boxTop + 1, boxLeft + 15, boxTop + 15, 0x70090C10);
+			context.fill(boxLeft, boxTop, boxLeft + 14, boxTop + 14, MARKER_ATTACKER_BG);
+			context.drawBorder(boxLeft, boxTop, 14, 14, MARKER_ATTACKER);
+			drawAttackerSymbol(context, point.x, point.y, attacker);
+		}
 	}
 
 	private void drawGuardMarkers(DrawContext context, Rect body, int mouseX, int mouseY) {
@@ -587,6 +823,7 @@ public class ArmyLedgerScreen extends Screen {
 			int boxLeft = marker.centerX - marker.radius - 1;
 			int boxTop = marker.centerY - marker.radius - 1;
 			int boxSize = marker.radius * 2 + 2;
+			context.fill(boxLeft + 1, boxTop + 1, boxLeft + boxSize + 1, boxTop + boxSize + 1, 0x600B0F13);
 			context.fill(boxLeft, boxTop, boxLeft + boxSize, boxTop + boxSize, 0xD0141A20);
 			context.drawBorder(boxLeft, boxTop, boxSize, boxSize, markerColor);
 			if (defender.role() == DefenderRole.ARCHER) {
@@ -724,7 +961,7 @@ public class ArmyLedgerScreen extends Screen {
 			drawChip(context, card.right() - 150, card.y + 10, 56, "Age " + ageShortLabel(siege.ageLevel()), accent, TEXT_PRIMARY);
 			drawChip(context, card.right() - 88, card.y + 10, 62, "+" + siege.warSuppliesReward() + " sup", 0x30546B43, TEXT_PRIMARY);
 			drawWavePips(context, card.x + 24, card.bottom() - 18, Math.min(12, siege.waveSize()), 12, accent);
-			drawSiegeFormationStrip(context, card.x + 148, card.bottom() - 22, siege, accent);
+			drawBattleGroupStrip(context, card.x + 148, card.bottom() - 21, card.right() - card.x - 160, siege, accent);
 			if (siege.replay()) {
 				drawScaledText(context, "reward route", card.right() - 122, card.bottom() - 20, TEXT_SECONDARY, 0.8F);
 			}
@@ -739,6 +976,7 @@ public class ArmyLedgerScreen extends Screen {
 	private void drawSiegeDetailPanel(DrawContext context, Layout layout) {
 		Rect panel = layout.detailPanel;
 		Rect body = layout.detailBody;
+		Rect footer = siegeButtonFooterRect(layout);
 		context.fill(panel.x, panel.y, panel.right(), panel.bottom(), PANEL_COLOR);
 		context.drawBorder(panel.x, panel.y, panel.width, panel.height, PANEL_BORDER);
 		context.fill(panel.x, panel.y, panel.right(), panel.y + PANEL_HEADER_HEIGHT, PANEL_HEADER_COLOR);
@@ -797,7 +1035,7 @@ public class ArmyLedgerScreen extends Screen {
 		drawWavePips(context, overviewCard.x + 12, waveY, Math.min(12, siege.waveSize()), 12, accent);
 		drawScaledText(context, "Wave pressure", overviewCard.x + 118, waveY - 3, TEXT_SECONDARY, metaScale(layout.density));
 		int formationY = waveY + 26;
-		drawSiegeFormationStrip(context, overviewCard.x + 12, formationY, siege, accent);
+		drawBattleGroupStrip(context, overviewCard.x + 12, formationY, overviewCard.width - 24, siege, accent);
 		rowY = formationY + 28;
 		rowY = drawStatRow(context, overviewCard.x + 12, rowY, "Enemies", siege.enemySummary(), overviewCard.width - 24);
 		rowY = drawStatRow(context, overviewCard.x + 12, rowY, "Weapons", siege.weaponSummary(), overviewCard.width - 24);
@@ -819,6 +1057,11 @@ public class ArmyLedgerScreen extends Screen {
 
 		context.disableScissor();
 		drawPanelScrollbar(context, body, getClampedSiegeDetailScroll(layout), getSiegeDetailScrollMax(layout), getSiegeDetailContentHeight(layout));
+		context.fill(footer.x, footer.y, footer.right(), footer.bottom(), PANEL_COLOR);
+		context.drawBorder(footer.x, footer.y, footer.width, footer.height, CARD_BORDER);
+		context.fill(footer.x, footer.y, footer.right(), footer.y + 22, PANEL_HEADER_COLOR);
+		context.fill(footer.x + 10, footer.y + 22, footer.right() - 10, footer.y + 23, CARD_BORDER);
+		drawScaledText(context, "Siege Commands", footer.x + 12, footer.y + 7, TEXT_SECONDARY, metaScale(layout.density));
 	}
 
 	private void drawDebugOverlay(DrawContext context, Layout layout, int mouseX, int mouseY) {
@@ -1032,13 +1275,6 @@ public class ArmyLedgerScreen extends Screen {
 		context.fill(centerX, centerY - 5, centerX + 1, centerY + 5, 0xE0F0F3F6);
 	}
 
-	private void drawRamMarker(DrawContext context, int x, int y, int color) {
-		context.fill(x, y + 2, x + 10, y + 8, color);
-		context.fill(x + 2, y, x + 8, y + 3, color);
-		context.fill(x + 1, y + 8, x + 3, y + 10, 0xE0F0F3F6);
-		context.fill(x + 7, y + 8, x + 9, y + 10, 0xE0F0F3F6);
-	}
-
 	private void drawChip(DrawContext context, int x, int y, int width, String text, int fillColor, int textColor) {
 		context.fill(x, y, x + width, y + 16, fillColor);
 		context.fill(x + 1, y + 1, x + width - 1, y + 15, 0x20000000);
@@ -1055,22 +1291,76 @@ public class ArmyLedgerScreen extends Screen {
 		}
 	}
 
-	private void drawSiegeFormationStrip(DrawContext context, int x, int y, ArmyLedgerSnapshot.SiegeEntry siege, int accent) {
-		int rangedCount = MathHelper.clamp(Math.max(2, siege.waveSize() / 3), 2, 4);
-		int breacherCount = MathHelper.clamp(Math.max(1, siege.ageLevel() + (siege.ramCount() > 0 ? 0 : 1)), 1, 3);
-		for (int i = 0; i < rangedCount; i++) {
-			drawBowMarker(context, x + (i * 14), y + 6, MARKER_ARCHER);
+	private void drawBattleGroupStrip(DrawContext context, int x, int y, int width, ArmyLedgerSnapshot.SiegeEntry siege, int accent) {
+		List<ArmyLedgerSnapshot.BattleGroupEntry> groups = siege.battleGroups();
+		if (groups.isEmpty()) {
+			return;
 		}
-		int swordStart = x + (rangedCount * 14) + 12;
-		for (int i = 0; i < breacherCount; i++) {
-			drawSwordMarker(context, swordStart + (i * 14), y + 6, MARKER_SOLDIER);
-		}
-		if (siege.ramCount() > 0) {
-			int ramX = swordStart + (breacherCount * 14) + 12;
-			for (int i = 0; i < siege.ramCount(); i++) {
-				drawRamMarker(context, ramX + (i * 14), y + 1, accent);
+		int cursorX = x;
+		int limitX = x + Math.max(0, width);
+		int visibleCount = 0;
+		for (int i = 0; i < groups.size(); i++) {
+			ArmyLedgerSnapshot.BattleGroupEntry group = groups.get(i);
+			int tokenWidth = battleGroupTokenWidth(group);
+			if (cursorX + tokenWidth > limitX) {
+				break;
 			}
+			drawBattleGroupToken(context, cursorX, y, tokenWidth, group, accent);
+			cursorX += tokenWidth + 6;
+			visibleCount++;
 		}
+		if (visibleCount < groups.size()) {
+			drawScaledText(context, "+" + (groups.size() - visibleCount) + " more", Math.min(cursorX, limitX - 36), y + 3, TEXT_MUTED, 0.72F);
+		}
+	}
+
+	private void drawBattleGroupToken(DrawContext context, int x, int y, int width, ArmyLedgerSnapshot.BattleGroupEntry group, int accent) {
+		ItemStack icon = battleGroupIcon(group);
+		int border = group.engine() ? accent : CARD_BORDER;
+		int fill = group.engine() ? 0x241E241C : 0x1E273039;
+		context.fill(x, y, x + width, y + 18, fill);
+		context.drawBorder(x, y, width, 18, border);
+		context.getMatrices().push();
+		context.getMatrices().translate(0.0F, 0.0F, 120.0F);
+		context.drawItem(icon, x + 1, y + 1);
+		context.getMatrices().pop();
+		drawScaledText(context, "x" + Math.max(0, group.count()), x + 18, y + 4, group.engine() ? TEXT_WARM : TEXT_PRIMARY, 0.72F);
+	}
+
+	private int battleGroupTokenWidth(ArmyLedgerSnapshot.BattleGroupEntry group) {
+		int countWidth = this.textRenderer.getWidth("x" + Math.max(0, group.count()));
+		return Math.max(36, 20 + countWidth + 10);
+	}
+
+	private ItemStack battleGroupIcon(ArmyLedgerSnapshot.BattleGroupEntry group) {
+		String kind = safeText(group.kindId(), "").toLowerCase(Locale.ROOT);
+		String label = safeText(group.displayName(), "").toLowerCase(Locale.ROOT);
+		String combined = kind + " " + label;
+		if (group.engine() || combined.contains("ram")) {
+			return new ItemStack(Items.OAK_LOG);
+		}
+		if (combined.contains("catapult") || combined.contains("trebuchet")) {
+			return new ItemStack(Items.DISPENSER);
+		}
+		if (combined.contains("shield")) {
+			return new ItemStack(Items.SHIELD);
+		}
+		if (combined.contains("bomber") || combined.contains("bomb")) {
+			return new ItemStack(Items.TNT);
+		}
+		if (combined.contains("arch") || combined.contains("ranged") || combined.contains("crossbow")) {
+			return new ItemStack(Items.CROSSBOW);
+		}
+		if (combined.contains("breach") || combined.contains("axe")) {
+			return new ItemStack(Items.IRON_AXE);
+		}
+		if (combined.contains("soldier") || combined.contains("melee") || combined.contains("guard")) {
+			return new ItemStack(Items.IRON_SWORD);
+		}
+		if (combined.contains("tech") || combined.contains("engineer")) {
+			return new ItemStack(Items.REDSTONE_TORCH);
+		}
+		return new ItemStack(Items.PAPER);
 	}
 
 	private void drawProgressBar(DrawContext context, int x, int y, int width, int height, int value, int max, int fillColor, int emptyColor) {
@@ -1679,21 +1969,20 @@ public class ArmyLedgerScreen extends Screen {
 			renameButton.visible = false;
 			cycleRoleButton.visible = false;
 			locateButton.visible = false;
-			SiegeDetailLayout detailLayout = createSiegeDetailLayout(layout);
-			int scrollOffset = getClampedSiegeDetailScroll(layout);
-			Rect actionsCardVirtual = offsetRect(detailLayout.actionsCard(), -scrollOffset);
-			Rect actionsCard = toActualRect(actionsCardVirtual);
-			ArmyLedgerSnapshot.SiegeEntry siege = getSelectedSiege();
+			Rect footer = toActualRect(siegeButtonFooterRect(layout));
 			int inset = toActualLength(12);
 			int gap = toActualLength(8);
 			int buttonHeight = previousSiegeButton.getHeight();
-			int rowGap = buttonHeight + toActualLength(4);
-			int leftX = actionsCard.x + inset;
-			int buttonWidth = (actionsCard.width - (inset * 2) - gap) / 2;
+			int buttonGap = toActualLength(6);
+			int rowGap = buttonHeight + buttonGap;
+			int leftX = footer.x + inset;
+			int buttonWidth = (footer.width - (inset * 2) - gap) / 2;
 			int rightX = leftX + buttonWidth + gap;
-			Rect visibleBody = toActualRect(layout.detailBody);
-			int topY = toActualY(siegeActionButtonsTop(layout, actionsCardVirtual, siege));
-			topY = Math.max(topY, actionsCard.y + inset);
+			int footerHeaderHeight = toActualLength(22);
+			int contentTop = footer.y + footerHeaderHeight + toActualLength(8);
+			int contentHeight = (buttonHeight * 3) + (buttonGap * 2);
+			int availableHeight = footer.bottom() - contentTop - inset;
+			int topY = contentTop + Math.max(0, (availableHeight - contentHeight) / 2);
 			previousSiegeButton.setX(leftX);
 			previousSiegeButton.setY(topY);
 			previousSiegeButton.setWidth(buttonWidth);
@@ -1702,14 +1991,14 @@ public class ArmyLedgerScreen extends Screen {
 			nextSiegeButton.setWidth(buttonWidth);
 			lockSiegeButton.setX(leftX);
 			lockSiegeButton.setY(topY + rowGap);
-			lockSiegeButton.setWidth(actionsCard.width - (inset * 2));
+			lockSiegeButton.setWidth(footer.width - (inset * 2));
 			startSiegeButton.setX(leftX);
 			startSiegeButton.setY(topY + (rowGap * 2));
-			startSiegeButton.setWidth(actionsCard.width - (inset * 2));
-			previousSiegeButton.visible = topY >= visibleBody.y && topY + buttonHeight <= visibleBody.bottom();
-			nextSiegeButton.visible = previousSiegeButton.visible;
-			lockSiegeButton.visible = topY + rowGap >= visibleBody.y && topY + rowGap + buttonHeight <= visibleBody.bottom();
-			startSiegeButton.visible = topY + (rowGap * 2) >= visibleBody.y && topY + (rowGap * 2) + buttonHeight <= visibleBody.bottom();
+			startSiegeButton.setWidth(footer.width - (inset * 2));
+			previousSiegeButton.visible = layout.detailVisible;
+			nextSiegeButton.visible = layout.detailVisible;
+			lockSiegeButton.visible = layout.detailVisible;
+			startSiegeButton.visible = layout.detailVisible;
 			return;
 		}
 		previousSiegeButton.visible = false;
@@ -1863,7 +2152,11 @@ public class ArmyLedgerScreen extends Screen {
 			? Math.max(300, detailPanel.x - mapPanel.x - 28)
 			: mapPanel.width - 28;
 		Rect mapBody = new Rect(mapPanel.x + 14, mapPanel.y + PANEL_HEADER_HEIGHT + 10, visibleMapWidth, mapPanel.height - PANEL_HEADER_HEIGHT - 18);
-		Rect detailBody = new Rect(detailPanel.x + 12, detailPanel.y + PANEL_HEADER_HEIGHT + 10, detailPanel.width - 24, detailPanel.height - PANEL_HEADER_HEIGHT - 22);
+		int detailBodyHeight = detailPanel.height - PANEL_HEADER_HEIGHT - 22;
+		if (ledgerMode == LedgerMode.SIEGES && detailVisible) {
+			detailBodyHeight -= siegeButtonFooterHeight() + SIEGE_BUTTON_FOOTER_GAP;
+		}
+		Rect detailBody = new Rect(detailPanel.x + 12, detailPanel.y + PANEL_HEADER_HEIGHT + 10, detailPanel.width - 24, detailBodyHeight);
 		return new Layout(frame, topBar, mapPanel, detailPanel, mapBody, detailBody, density, mode, detailVisible);
 	}
 
@@ -1907,7 +2200,7 @@ public class ArmyLedgerScreen extends Screen {
 		cycleRoleButton.visible = visible;
 		cycleRoleButton.active = hasSelection && visible;
 		locateButton.visible = visible;
-		locateButton.active = hasSelection && visible;
+		locateButton.active = AntiqueAtlasCompat.isAvailable();
 	}
 
 	private void refreshNameField() {
@@ -2028,7 +2321,7 @@ public class ArmyLedgerScreen extends Screen {
 		List<Marker> markers = new ArrayList<>();
 		for (int i = 0; i < snapshot.defenders().size(); i++) {
 			ArmyLedgerSnapshot.DefenderEntry defender = snapshot.defenders().get(i);
-			BlockPos pos = defender.online() ? defender.currentPos() : defender.homePost();
+			BlockPos pos = defender.homePost();
 			Point point = worldToMap(pos, body, bounds);
 			markers.add(new Marker(i, point.x, point.y, 6));
 		}
@@ -2036,11 +2329,19 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private Point worldToMap(BlockPos pos, Rect body, MapView bounds) {
-		float normalizedX = (pos.getX() - bounds.minX) / (float) Math.max(1, bounds.maxX - bounds.minX);
-		float normalizedZ = (pos.getZ() - bounds.minZ) / (float) Math.max(1, bounds.maxZ - bounds.minZ);
-		int x = body.x + Math.round(normalizedX * body.width);
-		int y = body.y + Math.round(normalizedZ * body.height);
+		int x = worldToMapX(pos.getX() + 0.5F, body, bounds);
+		int y = worldToMapY(pos.getZ() + 0.5F, body, bounds);
 		return new Point(MathHelper.clamp(x, body.x + 6, body.right() - 6), MathHelper.clamp(y, body.y + 6, body.bottom() - 6));
+	}
+
+	private int worldToMapX(float worldX, Rect body, MapView bounds) {
+		float normalizedX = (worldX - bounds.minX) / Math.max(1.0F, bounds.maxX - bounds.minX);
+		return body.x + Math.round(normalizedX * body.width);
+	}
+
+	private int worldToMapY(float worldZ, Rect body, MapView bounds) {
+		float normalizedZ = (worldZ - bounds.minZ) / Math.max(1.0F, bounds.maxZ - bounds.minZ);
+		return body.y + Math.round(normalizedZ * body.height);
 	}
 
 	private BaseBounds computeBaseBounds() {
@@ -2049,11 +2350,24 @@ public class ArmyLedgerScreen extends Screen {
 		int minZ = snapshot.bannerPos().getZ();
 		int maxZ = snapshot.bannerPos().getZ();
 
+		if (snapshot.hasRally()) {
+			minX = Math.min(minX, snapshot.rallyPos().getX());
+			maxX = Math.max(maxX, snapshot.rallyPos().getX());
+			minZ = Math.min(minZ, snapshot.rallyPos().getZ());
+			maxZ = Math.max(maxZ, snapshot.rallyPos().getZ());
+		}
+
 		for (ArmyLedgerSnapshot.DefenderEntry defender : snapshot.defenders()) {
 			minX = Math.min(minX, Math.min(defender.homePost().getX(), defender.currentPos().getX()));
 			maxX = Math.max(maxX, Math.max(defender.homePost().getX(), defender.currentPos().getX()));
 			minZ = Math.min(minZ, Math.min(defender.homePost().getZ(), defender.currentPos().getZ()));
 			maxZ = Math.max(maxZ, Math.max(defender.homePost().getZ(), defender.currentPos().getZ()));
+		}
+		for (ArmyLedgerSnapshot.AttackerEntry attacker : snapshot.attackers()) {
+			minX = Math.min(minX, attacker.currentPos().getX());
+			maxX = Math.max(maxX, attacker.currentPos().getX());
+			minZ = Math.min(minZ, attacker.currentPos().getZ());
+			maxZ = Math.max(maxZ, attacker.currentPos().getZ());
 		}
 
 		int padding = 5;
@@ -2092,38 +2406,47 @@ public class ArmyLedgerScreen extends Screen {
 
 	private void ensureMapCache(Rect body, MapView bounds) {
 		ClientWorld world = this.client == null ? null : this.client.world;
-		float detailScale = MathHelper.clamp(0.85F + (mapZoom * 0.9F), 1.0F, 3.6F);
-		int samplesX = MathHelper.clamp(Math.round((body.width / 7.0F) * detailScale), 40, 240);
-		int samplesZ = MathHelper.clamp(Math.round((body.height / 7.0F) * detailScale), 30, 180);
+		int minBlockX = MathHelper.floor(bounds.minX);
+		int maxBlockX = MathHelper.ceil(bounds.maxX);
+		int minBlockZ = MathHelper.floor(bounds.minZ);
+		int maxBlockZ = MathHelper.ceil(bounds.maxZ);
+		int samplesX = MathHelper.clamp(maxBlockX - minBlockX, 1, 320);
+		int samplesZ = MathHelper.clamp(maxBlockZ - minBlockZ, 1, 220);
 		long tick = world == null ? -1L : world.getTime() / 10L;
-		if (cachedMapBounds != null && cachedMapBounds.equals(bounds) && cachedSamplesX == samplesX && cachedSamplesZ == samplesZ && cachedMapTick == tick) {
+		if (cachedSamplesX == samplesX
+			&& cachedSamplesZ == samplesZ
+			&& cachedMapOriginX == minBlockX
+			&& cachedMapOriginZ == minBlockZ
+			&& cachedMapTick == tick) {
 			return;
 		}
 
 		cachedMapBounds = bounds;
+		cachedMapOriginX = minBlockX;
+		cachedMapOriginZ = minBlockZ;
 		cachedSamplesX = samplesX;
 		cachedSamplesZ = samplesZ;
 		cachedMapTick = tick;
 		cachedMapColors = new int[samplesX * samplesZ];
 		cachedMapKinds = new byte[samplesX * samplesZ];
+		cachedMapHeights = new int[samplesX * samplesZ];
 
 		for (int sampleZ = 0; sampleZ < samplesZ; sampleZ++) {
-			float zProgress = (sampleZ + 0.5F) / samplesZ;
-			int worldZ = MathHelper.floor(MathHelper.lerp(zProgress, bounds.minZ, bounds.maxZ));
+			int worldZ = minBlockZ + sampleZ;
 			for (int sampleX = 0; sampleX < samplesX; sampleX++) {
-				float xProgress = (sampleX + 0.5F) / samplesX;
-				int worldX = MathHelper.floor(MathHelper.lerp(xProgress, bounds.minX, bounds.maxX));
+				int worldX = minBlockX + sampleX;
 				MapSample sample = sampleMapColor(world, worldX, worldZ, snapshot.bannerPos().getY(), bounds);
 				int index = sampleZ * samplesX + sampleX;
 				cachedMapColors[index] = sample.color();
 				cachedMapKinds[index] = sample.kind();
+				cachedMapHeights[index] = sample.height();
 			}
 		}
 	}
 
 	private MapSample sampleMapColor(ClientWorld world, int x, int z, int fallbackY, MapView bounds) {
 		if (world == null) {
-			return new MapSample(0xFF2B3C2F, (byte) SAMPLE_NATURAL);
+			return new MapSample(0xFF2B3C2F, (byte) SAMPLE_NATURAL, fallbackY);
 		}
 		int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z) - 1;
 		int sampleY = Math.max(world.getBottomY(), topY > world.getBottomY() ? topY : fallbackY);
@@ -2138,16 +2461,17 @@ public class ArmyLedgerScreen extends Screen {
 		int eastY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x + 1, z) - 1;
 		int westY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x - 1, z) - 1;
 		int slope = (southY - northY) + (eastY - westY);
-		float shade = 1.0F + MathHelper.clamp(slope * 0.05F, -0.16F, 0.16F);
+		float shade = 1.0F + MathHelper.clamp(slope * 0.04F, -0.10F, 0.10F);
 		float distance = (Math.abs(x - snapshot.bannerPos().getX()) + Math.abs(z - snapshot.bannerPos().getZ()))
 			/ (float) Math.max(1, (bounds.maxX - bounds.minX) + (bounds.maxZ - bounds.minZ));
-		float focus = 1.02F - (distance * 0.03F);
+		float focus = 1.01F - (distance * 0.015F);
 		float contrast = switch (kind) {
-			case SAMPLE_PATH, SAMPLE_WOOD, SAMPLE_STONE, SAMPLE_CROP -> 1.08F;
-			case SAMPLE_WATER, SAMPLE_SAND -> 1.04F;
-			default -> 1.0F;
+			case SAMPLE_PATH, SAMPLE_WOOD, SAMPLE_STONE -> 1.10F;
+			case SAMPLE_CROP -> 1.04F;
+			case SAMPLE_WATER, SAMPLE_SAND -> 1.02F;
+			default -> 0.98F;
 		};
-		return new MapSample(shadeColor(baseColor, shade * focus * contrast), kind);
+		return new MapSample(shadeColor(baseColor, shade * focus * contrast), kind, sampleY);
 	}
 
 	private byte classifyBlock(BlockState state) {
@@ -2203,14 +2527,14 @@ public class ArmyLedgerScreen extends Screen {
 
 	private int tintBlockColor(int color, byte kind) {
 		return switch (kind) {
-			case SAMPLE_PATH -> blendColor(color, 0xFFC8A86A, 0.45F);
-			case SAMPLE_WOOD -> blendColor(color, 0xFF8B6738, 0.35F);
-			case SAMPLE_STONE -> blendColor(color, 0xFF888B90, 0.30F);
-			case SAMPLE_WATER -> blendColor(color, 0xFF5A82B4, 0.35F);
-			case SAMPLE_SAND -> blendColor(color, 0xFFD7C08A, 0.30F);
-			case SAMPLE_FOLIAGE -> blendColor(color, 0xFF5E8940, 0.25F);
-			case SAMPLE_CROP -> blendColor(color, 0xFF7DAE37, 0.35F);
-			default -> blendColor(color, 0xFF84B13C, 0.08F);
+			case SAMPLE_PATH -> blendColor(color, 0xFFC4A062, 0.52F);
+			case SAMPLE_WOOD -> blendColor(color, 0xFF8B6738, 0.44F);
+			case SAMPLE_STONE -> blendColor(color, 0xFF8A8E93, 0.40F);
+			case SAMPLE_WATER -> blendColor(color, 0xFF5A82B4, 0.34F);
+			case SAMPLE_SAND -> blendColor(color, 0xFFD7C08A, 0.28F);
+			case SAMPLE_FOLIAGE -> blendColor(color, 0xFF6E9A45, 0.12F);
+			case SAMPLE_CROP -> blendColor(color, 0xFF89B63D, 0.26F);
+			default -> blendColor(color, 0xFF88B542, 0.02F);
 		};
 	}
 
@@ -2244,6 +2568,7 @@ public class ArmyLedgerScreen extends Screen {
 		cachedSamplesX = -1;
 		cachedSamplesZ = -1;
 		cachedMapTick = Long.MIN_VALUE;
+		cachedMapHeights = new int[0];
 	}
 
 	private boolean contains(Rect rect, double mouseX, double mouseY) {
@@ -2361,14 +2686,13 @@ public class ArmyLedgerScreen extends Screen {
 		ClientPlayNetworking.send(ArmyLedgerService.ROLE_PACKET, buf);
 	}
 
-	private void sendLocate() {
+	private void openAtlas() {
+		BlockPos focus = snapshot.bannerPos();
 		ArmyLedgerSnapshot.DefenderEntry defender = getSelectedDefender();
-		if (defender == null) {
-			return;
+		if (defender != null) {
+			focus = defender.homePost();
 		}
-		PacketByteBuf buf = PacketByteBufs.create();
-		buf.writeUuid(defender.entityUuid());
-		ClientPlayNetworking.send(ArmyLedgerService.LOCATE_PACKET, buf);
+		AntiqueAtlasCompat.open(focus);
 	}
 
 	private void sendLockOrCancelSiege() {
@@ -2630,6 +2954,20 @@ public class ArmyLedgerScreen extends Screen {
 		return (buttonsTop - probe.y) + 92;
 	}
 
+	private int siegeButtonFooterHeight() {
+		return SIEGE_BUTTON_FOOTER_HEIGHT;
+	}
+
+	private Rect siegeButtonFooterRect(Layout layout) {
+		int footerHeight = siegeButtonFooterHeight();
+		return new Rect(
+			layout.detailPanel.x + 12,
+			layout.detailPanel.bottom() - 12 - footerHeight,
+			layout.detailPanel.width - 24,
+			footerHeight
+		);
+	}
+
 	private void drawScaledText(DrawContext context, String text, int x, int y, int color, float scale) {
 		context.getMatrices().push();
 		context.getMatrices().scale(scale, scale, 1.0F);
@@ -2852,6 +3190,6 @@ public class ArmyLedgerScreen extends Screen {
 	private record Marker(int defenderIndex, int centerX, int centerY, int radius) {
 	}
 
-	private record MapSample(int color, byte kind) {
+	private record MapSample(int color, byte kind, int height) {
 	}
 }

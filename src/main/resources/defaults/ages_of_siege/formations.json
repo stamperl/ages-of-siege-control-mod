@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "note": "Formation geometry for siege battle plans. Lanes are resolved by id and provide placement offsets and spacing.",
+  "formations": [
+    {
+      "id": "line",
+      "displayName": "Line",
+      "lanes": [
+        { "lane": "front", "lateralOffset": 0.0, "depthOffset": 0.0, "lateralStep": 3.0, "depthStep": 3.0, "rowWidth": 6 },
+        { "lane": "center", "lateralOffset": 0.0, "depthOffset": 3.0, "lateralStep": 3.0, "depthStep": 3.0, "rowWidth": 5 },
+        { "lane": "rear", "lateralOffset": 0.0, "depthOffset": 6.0, "lateralStep": 2.8, "depthStep": 3.0, "rowWidth": 5 },
+        { "lane": "left_flank", "lateralOffset": -6.0, "depthOffset": 3.0, "lateralStep": 1.2, "depthStep": 2.0, "rowWidth": 3 },
+        { "lane": "right_flank", "lateralOffset": 6.0, "depthOffset": 3.0, "lateralStep": 1.2, "depthStep": 2.0, "rowWidth": 3 },
+        { "lane": "engine", "lateralOffset": 0.0, "depthOffset": 8.0, "lateralStep": 4.0, "depthStep": 3.0, "rowWidth": 2 }
+      ]
+    },
+    {
+      "id": "wedge",
+      "displayName": "Wedge",
+      "lanes": [
+        { "lane": "front", "lateralOffset": 0.0, "depthOffset": 0.0, "lateralStep": 2.4, "depthStep": 3.0, "rowWidth": 5 },
+        { "lane": "center", "lateralOffset": 0.0, "depthOffset": 3.0, "lateralStep": 2.2, "depthStep": 3.0, "rowWidth": 4 },
+        { "lane": "rear", "lateralOffset": 0.0, "depthOffset": 6.0, "lateralStep": 2.0, "depthStep": 3.0, "rowWidth": 4 },
+        { "lane": "left_flank", "lateralOffset": -6.0, "depthOffset": 2.0, "lateralStep": 1.5, "depthStep": 2.0, "rowWidth": 2 },
+        { "lane": "right_flank", "lateralOffset": 6.0, "depthOffset": 2.0, "lateralStep": 1.5, "depthStep": 2.0, "rowWidth": 2 },
+        { "lane": "engine", "lateralOffset": 0.0, "depthOffset": 8.0, "lateralStep": 4.0, "depthStep": 3.0, "rowWidth": 1 }
+      ]
+    },
+    {
+      "id": "column",
+      "displayName": "Column",
+      "lanes": [
+        { "lane": "front", "lateralOffset": 0.0, "depthOffset": 0.0, "lateralStep": 1.8, "depthStep": 3.2, "rowWidth": 2 },
+        { "lane": "center", "lateralOffset": 0.0, "depthOffset": 3.0, "lateralStep": 1.8, "depthStep": 3.2, "rowWidth": 2 },
+        { "lane": "rear", "lateralOffset": 0.0, "depthOffset": 6.0, "lateralStep": 1.8, "depthStep": 3.2, "rowWidth": 2 },
+        { "lane": "left_flank", "lateralOffset": -4.0, "depthOffset": 3.0, "lateralStep": 1.0, "depthStep": 2.5, "rowWidth": 2 },
+        { "lane": "right_flank", "lateralOffset": 4.0, "depthOffset": 3.0, "lateralStep": 1.0, "depthStep": 2.5, "rowWidth": 2 },
+        { "lane": "engine", "lateralOffset": 0.0, "depthOffset": 8.0, "lateralStep": 3.0, "depthStep": 3.2, "rowWidth": 1 }
+      ]
+    },
+    {
+      "id": "crossfire",
+      "displayName": "Crossfire",
+      "lanes": [
+        { "lane": "front", "lateralOffset": 0.0, "depthOffset": 0.0, "lateralStep": 3.0, "depthStep": 3.0, "rowWidth": 4 },
+        { "lane": "center", "lateralOffset": 0.0, "depthOffset": 4.0, "lateralStep": 3.0, "depthStep": 3.0, "rowWidth": 4 },
+        { "lane": "rear", "lateralOffset": 0.0, "depthOffset": 6.0, "lateralStep": 2.6, "depthStep": 3.0, "rowWidth": 3 },
+        { "lane": "left_flank", "lateralOffset": -8.0, "depthOffset": 2.0, "lateralStep": 1.2, "depthStep": 2.0, "rowWidth": 3 },
+        { "lane": "right_flank", "lateralOffset": 8.0, "depthOffset": 2.0, "lateralStep": 1.2, "depthStep": 2.0, "rowWidth": 3 },
+        { "lane": "engine", "lateralOffset": 0.0, "depthOffset": 8.0, "lateralStep": 4.0, "depthStep": 3.0, "rowWidth": 1 }
+      ]
+    },
+    {
+      "id": "shell",
+      "displayName": "Shell",
+      "lanes": [
+        { "lane": "front", "lateralOffset": 0.0, "depthOffset": 0.0, "lateralStep": 2.8, "depthStep": 3.0, "rowWidth": 4 },
+        { "lane": "center", "lateralOffset": 0.0, "depthOffset": 3.0, "lateralStep": 2.5, "depthStep": 3.0, "rowWidth": 4 },
+        { "lane": "rear", "lateralOffset": 0.0, "depthOffset": 5.0, "lateralStep": 2.2, "depthStep": 3.0, "rowWidth": 3 },
+        { "lane": "left_flank", "lateralOffset": -5.0, "depthOffset": 2.0, "lateralStep": 1.5, "depthStep": 2.0, "rowWidth": 3 },
+        { "lane": "right_flank", "lateralOffset": 5.0, "depthOffset": 2.0, "lateralStep": 1.5, "depthStep": 2.0, "rowWidth": 3 },
+        { "lane": "engine", "lateralOffset": 0.0, "depthOffset": 7.0, "lateralStep": 4.0, "depthStep": 3.0, "rowWidth": 1 }
+      ]
+    },
+    {
+      "id": "milestone",
+      "displayName": "Milestone",
+      "lanes": [
+        { "lane": "front", "lateralOffset": 0.0, "depthOffset": 0.0, "lateralStep": 3.2, "depthStep": 3.0, "rowWidth": 5 },
+        { "lane": "center", "lateralOffset": 0.0, "depthOffset": 3.0, "lateralStep": 3.0, "depthStep": 3.0, "rowWidth": 5 },
+        { "lane": "rear", "lateralOffset": 0.0, "depthOffset": 6.0, "lateralStep": 2.8, "depthStep": 3.0, "rowWidth": 4 },
+        { "lane": "left_flank", "lateralOffset": -7.0, "depthOffset": 2.0, "lateralStep": 1.4, "depthStep": 2.0, "rowWidth": 3 },
+        { "lane": "right_flank", "lateralOffset": 7.0, "depthOffset": 2.0, "lateralStep": 1.4, "depthStep": 2.0, "rowWidth": 3 },
+        { "lane": "engine", "lateralOffset": 0.0, "depthOffset": 7.0, "lateralStep": 4.5, "depthStep": 3.0, "rowWidth": 2 }
+      ]
+    },
+    {
+      "id": "ram_push",
+      "displayName": "Ram Push",
+      "lanes": [
+        { "lane": "front", "lateralOffset": 0.0, "depthOffset": 1.0, "lateralStep": 3.0, "depthStep": 3.0, "rowWidth": 4 },
+        { "lane": "center", "lateralOffset": 0.0, "depthOffset": 4.0, "lateralStep": 3.0, "depthStep": 3.0, "rowWidth": 4 },
+        { "lane": "rear", "lateralOffset": 0.0, "depthOffset": 7.0, "lateralStep": 2.8, "depthStep": 3.0, "rowWidth": 3 },
+        { "lane": "left_flank", "lateralOffset": -6.0, "depthOffset": 3.0, "lateralStep": 1.2, "depthStep": 2.0, "rowWidth": 2 },
+        { "lane": "right_flank", "lateralOffset": 6.0, "depthOffset": 3.0, "lateralStep": 1.2, "depthStep": 2.0, "rowWidth": 2 },
+        { "lane": "engine", "lateralOffset": 0.0, "depthOffset": 4.0, "lateralStep": 3.5, "depthStep": 3.0, "rowWidth": 1 }
+      ]
+    }
+  ]
+}
