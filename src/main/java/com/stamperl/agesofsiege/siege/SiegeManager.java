@@ -236,8 +236,6 @@ public final class SiegeManager {
 
 		if (livingAttackers.isEmpty() && livingRams.isEmpty()) {
 			int previousAge = state.getAgeLevel();
-			var completedSession = state.getActiveSession();
-			REWARD_SERVICE.dropVictoryRewards(world, completedSession, objectivePos, state.getAgeLevel(), state.getSelectedSiegeId());
 			state.endSiege(false, true);
 			server.getPlayerManager().broadcast(Text.literal("The siege wave has been defeated."), false);
 			if (state.getAgeLevel() > previousAge) {

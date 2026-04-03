@@ -94,6 +94,89 @@ public final class SiegeCatalog {
 		return catalogState.battleTemplate(id);
 	}
 
+	public static boolean isDefinitionUnlocked(SiegeBaseState state, SiegeDefinition definition) {
+		if (state == null || definition == null) {
+			return false;
+		}
+		SiegeCampaignNode node = campaignNode(definition.id());
+		return node != null && isNodeUnlocked(state, node);
+	}
+
+	public static boolean isDefinitionReplay(SiegeBaseState state, SiegeDefinition definition) {
+		if (state == null || definition == null) {
+			return false;
+		}
+		SiegeCampaignNode node = campaignNode(definition.id());
+		return node != null && isNodeReplay(state, node);
+	}
+
+	public static boolean isNodeUnlocked(SiegeBaseState state, SiegeCampaignNode node) {
+		if (state == null || node == null) {
+			return false;
+		}
+		if (node.ageLevel() < state.getAgeLevel()) {
+			return true;
+		}
+		if (node.ageLevel() > state.getAgeLevel()) {
+			return false;
+		}
+		if (state.hasCompletedSiege(node.id())) {
+			return true;
+		}
+		List<SiegeCampaignNode> ageNodes = campaignNodesForAge(node.ageLevel());
+		if (ageNodes.isEmpty()) {
+			return false;
+		}
+		int index = ageNodes.indexOf(node);
+		if (index <= 0) {
+			return true;
+		}
+		for (int i = 0; i < index; i++) {
+			if (!state.hasCompletedSiege(ageNodes.get(i).id())) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	public static boolean isNodeReplay(SiegeBaseState state, SiegeCampaignNode node) {
+		if (state == null || node == null) {
+			return false;
+		}
+		return node.ageLevel() < state.getAgeLevel() || state.hasCompletedSiege(node.id());
+	}
+
+	public static SiegeDefinition nextSequentialSiege(SiegeBaseState state, String currentSiegeId) {
+		SiegeDefinition current = byId(currentSiegeId);
+		if (current == null) {
+			return highestUnlocked(state);
+		}
+		List<SiegeCampaignNode> ageNodes = campaignNodesForAge(current.ageLevel());
+		for (int i = 0; i < ageNodes.size(); i++) {
+			if (!ageNodes.get(i).id().equals(current.id())) {
+				continue;
+			}
+			for (int nextIndex = i + 1; nextIndex < ageNodes.size(); nextIndex++) {
+				SiegeCampaignNode nextNode = ageNodes.get(nextIndex);
+				if (!state.hasCompletedSiege(nextNode.id())) {
+					return resolveForState(state, nextNode.id());
+				}
+			}
+		}
+		return resolveForState(state, current.id());
+	}
+
+	private static List<SiegeCampaignNode> campaignNodesForAge(int ageLevel) {
+		return catalogState.campaignNodes().stream()
+			.filter(node -> node.ageLevel() == ageLevel)
+			.sorted(Comparator
+				.comparingInt(SiegeCampaignNode::routeColumn)
+				.thenComparingInt(SiegeCampaignNode::routeRow)
+				.thenComparing(SiegeCampaignNode::displayName)
+				.thenComparing(SiegeCampaignNode::id))
+			.toList();
+	}
+
 	private static CatalogState loadConfig(Path configPath) throws IOException {
 		try (Reader reader = Files.newBufferedReader(configPath)) {
 			SiegeConfigRoot root = GSON.fromJson(reader, SiegeConfigRoot.class);
@@ -396,17 +479,11 @@ public final class SiegeCatalog {
 		}
 
 		public boolean isUnlocked(SiegeBaseState state) {
-			if (ageLevel < state.getAgeLevel()) {
-				return true;
-			}
-			if (ageLevel > state.getAgeLevel()) {
-				return false;
-			}
-			return state.getCurrentAgeRegularWins() >= requiredRegularWins;
+			return SiegeCatalog.isDefinitionUnlocked(state, this);
 		}
 
 		public boolean isReplay(SiegeBaseState state) {
-			return ageLevel < state.getAgeLevel();
+			return state != null && SiegeCatalog.isDefinitionReplay(state, this);
 		}
 	}
 

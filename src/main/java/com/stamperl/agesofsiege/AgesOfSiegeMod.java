@@ -1,10 +1,13 @@
 package com.stamperl.agesofsiege;
 
+import com.stamperl.agesofsiege.api.AgesOfSiegeIntegrationApi;
+import com.stamperl.agesofsiege.block.ModBlocks;
 import com.stamperl.agesofsiege.command.ModCommands;
 import com.stamperl.agesofsiege.defense.DefenderRuntimeService;
 import com.stamperl.agesofsiege.entity.ModEntities;
 import com.stamperl.agesofsiege.item.ModItems;
 import com.stamperl.agesofsiege.ledger.ArmyLedgerService;
+import com.stamperl.agesofsiege.report.SiegeWarReportService;
 import com.stamperl.agesofsiege.siege.BattleFormationCatalog;
 import com.stamperl.agesofsiege.siege.BattleUnitCatalog;
 import com.stamperl.agesofsiege.siege.SiegeDirector;
@@ -20,11 +23,14 @@ public class AgesOfSiegeMod implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		ModEntities.register();
+		ModBlocks.register();
 		ModItems.register();
 		BattleUnitCatalog.initialize();
 		BattleFormationCatalog.initialize();
 		SiegeCatalog.initialize();
+		AgesOfSiegeIntegrationApi.register();
 		ArmyLedgerService.registerServer();
+		SiegeWarReportService.registerServer();
 		ModCommands.register();
 		DefenderRuntimeService.register();
 		SiegeDirector.register();

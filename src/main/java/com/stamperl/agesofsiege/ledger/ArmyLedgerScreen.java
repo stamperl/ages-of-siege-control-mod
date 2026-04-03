@@ -110,6 +110,7 @@ public class ArmyLedgerScreen extends Screen {
 	private ButtonWidget renameButton;
 	private ButtonWidget cycleRoleButton;
 	private ButtonWidget locateButton;
+	private ButtonWidget reopenReportButton;
 	private ButtonWidget defendersTabButton;
 	private ButtonWidget siegesTabButton;
 	private ButtonWidget previousSiegeButton;
@@ -184,6 +185,8 @@ public class ArmyLedgerScreen extends Screen {
 		this.cycleRoleButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Cycle Role"), button -> sendRoleCycle())
 			.dimensions(0, 0, 90, 20).build());
 		this.locateButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Open Tactical Atlas"), button -> openAtlas())
+			.dimensions(0, 0, 90, 20).build());
+		this.reopenReportButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Reopen Report"), button -> reopenWarReport())
 			.dimensions(0, 0, 90, 20).build());
 		this.defendersTabButton = this.addDrawableChild(ButtonWidget.builder(Text.literal("Defenders"), button -> setLedgerMode(LedgerMode.DEFENDERS))
 			.dimensions(0, 0, 88, 20).build());
@@ -471,7 +474,6 @@ public class ArmyLedgerScreen extends Screen {
 	private void drawTopBarNavCard(DrawContext context, Rect rect, Layout layout) {
 		context.fill(rect.x, rect.y, rect.right(), rect.bottom(), CARD_COLOR);
 		context.drawBorder(rect.x, rect.y, rect.width, rect.height, CARD_BORDER);
-		drawScaledText(context, "VIEW", rect.x + 10, rect.y + 8, TEXT_SECONDARY, metaScale(layout.density));
 	}
 
 	private Rect topBarNavRect(Layout layout) {
@@ -1014,7 +1016,7 @@ public class ArmyLedgerScreen extends Screen {
 		String titleStatus = siege.unlocked()
 			? (siege.replay() ? "Completed route - replayable for rewards" : (siege.ageDefining() ? "Age-defining boss siege" : (isMinorRaid(siege) ? "Variable raid contract" : "Progress operation")))
 			: siege.ageDefining()
-				? "Locked until " + snapshot.ageProgressTarget() + " regular wins in this age"
+				? "Locked until the full age route is cleared"
 				: "Locked until the current age route opens";
 		if (compactSiegeDetail) {
 			drawScaledText(context, titleStatus, titleTextX, titleCard.y + 34, siege.unlocked() ? TEXT_WARM : TEXT_MUTED, 0.72F);
@@ -1042,18 +1044,8 @@ public class ArmyLedgerScreen extends Screen {
 		drawStatRow(context, overviewCard.x + 12, rowY, "Threat", siege.threatSummary(), overviewCard.width - 24);
 
 		int actionY = actionsCard.y + 12;
-		drawScaledText(context, "Command Post", actionsCard.x + 12, actionY, TEXT_SECONDARY, metaScale(layout.density));
-		int commandSummaryY = actionY + 16;
-		String commandSummary = snapshot.currentAgeName() + " age - " + snapshot.completedSieges() + " victories";
-		drawWrapped(context, commandSummary, actionsCard.x + 12, commandSummaryY, actionsCard.width - 24, TEXT_PRIMARY, 0);
-		int commandSummaryHeight = wrappedTextHeight(commandSummary, actionsCard.width - 24, 0, layout.density);
-		int statusY = commandSummaryY + commandSummaryHeight + 8;
-		String siegeStatus = selectedSiegeStatus(siege);
-		drawWrapped(context, siegeStatus, actionsCard.x + 12, statusY, actionsCard.width - 24, TEXT_SECONDARY, 0);
-		int statusHeight = wrappedTextHeight(siegeStatus, actionsCard.width - 24, 0, layout.density);
-		int rallyY = statusY + statusHeight + 8;
-		String rallyText = "Rally: " + (snapshot.hasRally() ? snapshot.rallyPos().toShortString() : "Not placed");
-		drawWrapped(context, rallyText, actionsCard.x + 12, rallyY, actionsCard.width - 24, snapshot.hasRally() ? TEXT_WARM : TEXT_MUTED, 0);
+		drawScaledText(context, "Rewards", actionsCard.x + 12, actionY, TEXT_SECONDARY, metaScale(layout.density));
+		drawSiegeRewardSections(context, actionsCard, siege, actionY + 16);
 
 		context.disableScissor();
 		drawPanelScrollbar(context, body, getClampedSiegeDetailScroll(layout), getSiegeDetailScrollMax(layout), getSiegeDetailContentHeight(layout));
@@ -1954,8 +1946,11 @@ public class ArmyLedgerScreen extends Screen {
 		Layout layout = createLayout();
 		Rect navRect = toActualRect(topBarNavRect(layout));
 		int navGap = toActualLength(10);
-		int navButtonY = navRect.y + Math.max(toActualLength(12), (navRect.height - 20) / 2);
+		int navButtonHeight = defendersTabButton.getHeight();
+		boolean showReopen = true;
 		int navButtonWidth = (navRect.width - (navGap * 3)) / 2;
+		int navButtonsHeight = showReopen ? (navButtonHeight * 2) + navGap : navButtonHeight;
+		int navButtonY = navRect.y + Math.max(toActualLength(12), (navRect.height - navButtonsHeight) / 2);
 		defendersTabButton.setX(navRect.x + navGap);
 		defendersTabButton.setY(navButtonY);
 		defendersTabButton.setWidth(navButtonWidth);
@@ -1964,6 +1959,10 @@ public class ArmyLedgerScreen extends Screen {
 		siegesTabButton.setWidth(navButtonWidth);
 		defendersTabButton.visible = true;
 		siegesTabButton.visible = true;
+		reopenReportButton.setX(navRect.x + navGap);
+		reopenReportButton.setY(navButtonY + navButtonHeight + navGap);
+		reopenReportButton.setWidth(navRect.width - (navGap * 2));
+		reopenReportButton.visible = showReopen;
 		if (ledgerMode == LedgerMode.SIEGES) {
 			nameField.setVisible(false);
 			renameButton.visible = false;
@@ -2164,6 +2163,9 @@ public class ArmyLedgerScreen extends Screen {
 		if (defendersTabButton != null) {
 			defendersTabButton.active = ledgerMode != LedgerMode.DEFENDERS;
 			siegesTabButton.active = ledgerMode != LedgerMode.SIEGES;
+			reopenReportButton.visible = true;
+			reopenReportButton.active = snapshot.hasPendingWarReport();
+			reopenReportButton.setMessage(Text.literal(snapshot.hasPendingWarReport() ? "Reopen Report" : "No Report"));
 		}
 		if (ledgerMode == LedgerMode.SIEGES) {
 			nameField.setVisible(false);
@@ -2695,6 +2697,10 @@ public class ArmyLedgerScreen extends Screen {
 		AntiqueAtlasCompat.open(focus);
 	}
 
+	private void reopenWarReport() {
+		ClientPlayNetworking.send(ArmyLedgerService.REOPEN_REPORT_PACKET, PacketByteBufs.create());
+	}
+
 	private void sendLockOrCancelSiege() {
 		if (snapshot.siegeLocked()) {
 			ClientPlayNetworking.send(ArmyLedgerService.CANCEL_SIEGE_PACKET, PacketByteBufs.create());
@@ -2768,7 +2774,7 @@ public class ArmyLedgerScreen extends Screen {
 		}
 		if (!siege.unlocked()) {
 			if (siege.ageDefining()) {
-				return "Win " + snapshot.ageProgressTarget() + " regular sieges in this age to unlock the age siege.";
+				return "Clear every raid in this age route to unlock the age siege.";
 			}
 			if (siege.ageLevel() > snapshot.currentAgeLevel()) {
 				return "Clear the current age siege to unlock the next age route.";
@@ -2937,21 +2943,65 @@ public class ArmyLedgerScreen extends Screen {
 	}
 
 	private int siegeActionButtonsTop(Layout layout, Rect actionsCard, ArmyLedgerSnapshot.SiegeEntry siege) {
-		int summaryY = actionsCard.y + 28;
-		String summary = snapshot.currentAgeName() + " age - " + snapshot.completedSieges() + " victories";
-		int summaryHeight = wrappedTextHeight(summary, actionsCard.width - 24, 0, layout.density);
-		int statusY = summaryY + summaryHeight + 8;
-		int statusHeight = wrappedTextHeight(selectedSiegeStatus(siege), actionsCard.width - 24, 0, layout.density);
-		int rallyY = statusY + statusHeight + 8;
-		String rallyText = "Rally: " + (snapshot.hasRally() ? snapshot.rallyPos().toShortString() : "Not placed");
-		int rallyHeight = wrappedTextHeight(rallyText, actionsCard.width - 24, 0, layout.density);
-		return rallyY + rallyHeight + 12;
+		return actionsCard.y + siegeRewardsContentHeight(layout, siege);
 	}
 
 	private int siegeActionsContentHeight(Layout layout, ArmyLedgerSnapshot.SiegeEntry siege) {
 		Rect probe = new Rect(layout.detailBody.x, layout.detailBody.y, layout.detailBody.width, 0);
 		int buttonsTop = siegeActionButtonsTop(layout, probe, siege);
 		return (buttonsTop - probe.y) + 92;
+	}
+
+	private void drawSiegeRewardSections(DrawContext context, Rect card, ArmyLedgerSnapshot.SiegeEntry siege, int startY) {
+		if (siege == null) {
+			return;
+		}
+		int rowY = startY;
+		drawWrapped(context, "First clears give the better haul. Reruns stay in-age but pay out less.", card.x + 12, rowY, card.width - 24, TEXT_MUTED, 0);
+		rowY += wrappedTextHeight("First clears give the better haul. Reruns stay in-age but pay out less.", card.width - 24, 0, layoutDensity()) + 10;
+		drawScaledText(context, "First Clear", card.x + 12, rowY, TEXT_WARM, metaScale(layoutDensity()));
+		rowY += 16;
+		rowY = drawRewardPreviewList(context, card.x + 12, rowY, card.width - 24, siege.firstClearRewardPreview());
+		rowY += 8;
+		drawScaledText(context, "Rerun", card.x + 12, rowY, TEXT_SECONDARY, metaScale(layoutDensity()));
+		rowY += 16;
+		drawRewardPreviewList(context, card.x + 12, rowY, card.width - 24, siege.rerunRewardPreview());
+	}
+
+	private int drawRewardPreviewList(DrawContext context, int x, int y, int width, List<ArmyLedgerSnapshot.RewardPreviewEntry> rewards) {
+		if (rewards == null || rewards.isEmpty()) {
+			drawScaledText(context, "No rewards listed", x, y, TEXT_MUTED, bodyScale(layoutDensity()));
+			return y + Math.round(12 * bodyScale(layoutDensity()));
+		}
+		int rowY = y;
+		for (ArmyLedgerSnapshot.RewardPreviewEntry reward : rewards) {
+			String line = reward.displayName() + " x" + reward.count();
+			int color = reward.ageGear() ? TEXT_PRIMARY : TEXT_MUTED;
+			drawTrimmed(context, line, x, rowY, width, color);
+			rowY += Math.round(12 * bodyScale(layoutDensity()));
+		}
+		return rowY;
+	}
+
+	private int siegeRewardsContentHeight(Layout layout, ArmyLedgerSnapshot.SiegeEntry siege) {
+		if (siege == null) {
+			return 168;
+		}
+		int width = Math.max(120, layout.detailBody.width - 24);
+		int total = 28;
+		String note = "First clears give the better haul. Reruns stay in-age but pay out less.";
+		total += wrappedTextHeight(note, width, 0, layout.density) + 10;
+		total += 16;
+		total += rewardPreviewHeight(siege.firstClearRewardPreview(), layout.density);
+		total += 8;
+		total += 16;
+		total += rewardPreviewHeight(siege.rerunRewardPreview(), layout.density);
+		return total + 12;
+	}
+
+	private int rewardPreviewHeight(List<ArmyLedgerSnapshot.RewardPreviewEntry> rewards, LayoutDensity density) {
+		int rows = (rewards == null || rewards.isEmpty()) ? 1 : rewards.size();
+		return rows * Math.round(12 * bodyScale(density));
 	}
 
 	private int siegeButtonFooterHeight() {

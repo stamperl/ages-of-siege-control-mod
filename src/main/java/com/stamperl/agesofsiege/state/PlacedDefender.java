@@ -1,6 +1,7 @@
 package com.stamperl.agesofsiege.state;
 
 import com.stamperl.agesofsiege.defense.DefenderRole;
+import com.stamperl.agesofsiege.defense.DefenderTokenData;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.util.math.BlockPos;
 
@@ -17,8 +18,13 @@ public record PlacedDefender(
 	String settlementDimensionId,
 	String ownerName,
 	UUID ownerUuid,
-	String defenderName
+	String defenderName,
+	NbtCompound tokenData
 ) {
+	public PlacedDefender {
+		tokenData = tokenData == null ? new NbtCompound() : tokenData.copy();
+	}
+
 	public NbtCompound toNbt() {
 		NbtCompound nbt = new NbtCompound();
 		nbt.putUuid("entityUuid", entityUuid);
@@ -46,6 +52,9 @@ public record PlacedDefender(
 		if (defenderName != null) {
 			nbt.putString("defenderName", defenderName);
 		}
+		if (!tokenData.isEmpty()) {
+			nbt.put("tokenData", tokenData.copy());
+		}
 		return nbt;
 	}
 
@@ -64,7 +73,15 @@ public record PlacedDefender(
 			nbt.contains("settlementDimensionId") ? nbt.getString("settlementDimensionId") : null,
 			nbt.contains("ownerName") ? nbt.getString("ownerName") : null,
 			nbt.containsUuid("ownerUuid") ? nbt.getUuid("ownerUuid") : null,
-			nbt.contains("defenderName") ? nbt.getString("defenderName") : null
+			nbt.contains("defenderName") ? nbt.getString("defenderName") : null,
+			nbt.contains("tokenData") ? nbt.getCompound("tokenData") : DefenderTokenData.createLegacyData(
+				DefenderRole.valueOf(nbt.getString("role")),
+				nbt.contains("defenderName") ? nbt.getString("defenderName") : null
+			)
 		);
+	}
+
+	public NbtCompound tokenData() {
+		return tokenData.copy();
 	}
 }

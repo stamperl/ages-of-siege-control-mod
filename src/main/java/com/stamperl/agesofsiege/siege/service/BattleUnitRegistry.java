@@ -9,6 +9,7 @@ import com.stamperl.agesofsiege.siege.runtime.BreachCapability;
 import com.stamperl.agesofsiege.siege.runtime.SiegeBattlePlan;
 import com.stamperl.agesofsiege.siege.runtime.UnitRole;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.mob.PillagerEntity;
@@ -82,6 +83,9 @@ public final class BattleUnitRegistry {
 		}
 		hostile.setCanPickUpLoot(false);
 		hostile.setPersistent();
+		for (EquipmentSlot slot : EquipmentSlot.values()) {
+			hostile.setEquipmentDropChance(slot, 0.0F);
+		}
 
 		MedievalLoadouts.RaiderRole raiderRole = resolveLoadoutRole(role, loadoutProfile);
 		MedievalLoadouts.equipAttacker(hostile, raiderRole, clampTier(loadoutTier), random);
@@ -108,6 +112,9 @@ public final class BattleUnitRegistry {
 			ram.setCustomNameVisible(true);
 			ram.setAiDisabled(true);
 			ram.setPersistent();
+			for (EquipmentSlot slot : EquipmentSlot.values()) {
+				ram.setEquipmentDropChance(slot, 0.0F);
+			}
 		}
 	}
 

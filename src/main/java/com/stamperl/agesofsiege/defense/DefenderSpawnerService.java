@@ -4,12 +4,10 @@ import com.stamperl.agesofsiege.state.PlacedDefender;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
-import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
-import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -68,7 +66,8 @@ public final class DefenderSpawnerService {
 				mob.setPersistent();
 				mob.setCanPickUpLoot(false);
 			}
-			applyRoleLoadout(living, role);
+			applyNoCombatDrops(living);
+			DefenderTokenData.applyToEntity(living, DefenderTokenData.createFreshData(role, 0, world.random), role);
 			world.spawnEntity(living);
 			spawned++;
 		}
@@ -100,6 +99,10 @@ public final class DefenderSpawnerService {
 			player.sendMessage(Text.literal("Defender tokens only work in the claimed settlement dimension.").formatted(Formatting.RED), true);
 			return false;
 		}
+		if (!DefenderTokenData.canDeploy(stack)) {
+			player.sendMessage(Text.literal("This defender token must be repaired first.").formatted(Formatting.RED), true);
+			return false;
+		}
 
 		BlockPos targetPos = resolvePlacement(context);
 		if (targetPos == null) {
@@ -128,7 +131,14 @@ public final class DefenderSpawnerService {
 			player.getYaw(),
 			0.0F
 		);
-		String defenderName = role.displayName() + " Guard";
+		var tokenData = DefenderTokenData.ensureDeploymentData(
+			stack,
+			role,
+			state.getAgeLevel(),
+			player.getRandom(),
+			state.getPlacedDefenders().stream().map(PlacedDefender::defenderName).toList()
+		);
+		String defenderName = DefenderTokenData.displayName(tokenData, role);
 		applyDisplayName(living, defenderName);
 		living.addCommandTag(DEFENDER_TAG);
 		living.addCommandTag(BOUND_DEFENDER_TAG);
@@ -137,7 +147,8 @@ public final class DefenderSpawnerService {
 			mob.setPersistent();
 			mob.setCanPickUpLoot(false);
 		}
-		applyRoleLoadout(living, role);
+		applyNoCombatDrops(living);
+		DefenderTokenData.applyToEntity(living, tokenData, role);
 		player.getServerWorld().spawnEntity(living);
 
 		state.addPlacedDefender(new PlacedDefender(
@@ -151,7 +162,8 @@ public final class DefenderSpawnerService {
 			state.getDimensionId(),
 			player.getGameProfile().getName(),
 			player.getUuid(),
-			defenderName
+			defenderName,
+			tokenData
 		));
 
 		if (!player.getAbilities().creativeMode) {
@@ -171,22 +183,16 @@ public final class DefenderSpawnerService {
 	}
 
 	public static void applyRoleLoadout(LivingEntity defender, DefenderRole role) {
-		if (role == DefenderRole.ARCHER) {
-			defender.equipStack(EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
-			defender.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.ARROW, 64));
-			defender.equipStack(EquipmentSlot.HEAD, new ItemStack(Items.CHAINMAIL_HELMET));
-			defender.equipStack(EquipmentSlot.CHEST, new ItemStack(Items.CHAINMAIL_CHESTPLATE));
-			defender.equipStack(EquipmentSlot.LEGS, new ItemStack(Items.CHAINMAIL_LEGGINGS));
-			defender.equipStack(EquipmentSlot.FEET, new ItemStack(Items.CHAINMAIL_BOOTS));
+		DefenderTokenData.applyToEntity(defender, DefenderTokenData.createFreshData(role, 0, defender.getRandom()), role);
+	}
+
+	public static void applyNoCombatDrops(LivingEntity defender) {
+		if (!(defender instanceof MobEntity mob)) {
 			return;
 		}
-
-		defender.equipStack(EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_SWORD));
-		defender.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
-		defender.equipStack(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
-		defender.equipStack(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
-		defender.equipStack(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
-		defender.equipStack(EquipmentSlot.FEET, new ItemStack(Items.IRON_BOOTS));
+		for (var slot : net.minecraft.entity.EquipmentSlot.values()) {
+			mob.setEquipmentDropChance(slot, 0.0F);
+		}
 	}
 
 	private BlockPos formationPosition(ServerWorld world, BlockPos center, int index) {

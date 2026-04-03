@@ -22,6 +22,8 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -34,10 +36,13 @@ public final class SiegeUnitController {
 	private static final double RANGED_AGGRO_RANGE = 18.0D;
 	private static final double ESCORT_RANGE = 5.0D;
 	private static final double DEFENDER_SCREEN_RANGE = 12.0D;
+	private static final double ESCORT_DEFENDER_RANGE = 14.0D;
+	private static final double SCREEN_MOVE_RADIUS = 16.0D;
 
 	private final ObjectiveService objectiveService = new ObjectiveService();
 	private final RamController ramController = new RamController();
 	private final Set<String> fallbackLoggedSessions = new HashSet<>();
+	private final Map<String, String> liveRoleBalanceSignatures = new HashMap<>();
 
 	public void dispatch(ServerWorld world, SiegeBaseState state, SiegeSession session) {
 		if (session.getPhase() == SiegePhase.STAGED || session.getPhase() == SiegePhase.COUNTDOWN) {
@@ -45,28 +50,26 @@ public final class SiegeUnitController {
 			return;
 		}
 
-		Map<UUID, UnitRole> assignments = session.getRoleAssignments();
 		SiegePlan plan = session.getCurrentPlan();
 		BlockPos objectivePos = session.getObjectivePos();
-		List<Vec3d> primaryBreacherPositions = new ArrayList<>();
 		List<LivingEntity> placedDefenders = resolvePlacedDefenders(world, state);
+		Map<UUID, UnitRole> liveAssignments = deriveLiveRoleAssignments(world, session);
+		List<Vec3d> primaryBreacherPositions = primaryBreacherPositions(world, session, liveAssignments);
 		boolean hasLivingActiveRam = hasLivingActiveRam(world, session);
-		boolean hasLivingPrimaryBreacher = hasLivingPrimaryBreacher(world, session);
+		boolean hasLivingPrimaryBreacher = !primaryBreacherPositions.isEmpty();
 		boolean fallbackBreachEnabled = !hasLivingPrimaryBreacher && !hasLivingActiveRam;
 		handleFallbackBreachLogging(session, fallbackBreachEnabled, hasLivingPrimaryBreacher, hasLivingActiveRam);
+		logLiveRoleBalance(world, session, liveAssignments);
 
 		for (UUID attackerId : session.getAttackerIds()) {
 			Entity entity = world.getEntity(attackerId);
 			if (!(entity instanceof HostileEntity hostile) || !hostile.isAlive()) {
 				continue;
 			}
-			UnitRole role = assignments.getOrDefault(attackerId, UnitRole.RANGED);
+			UnitRole role = liveAssignments.getOrDefault(attackerId, UnitRole.RANGED);
 			BreachCapability breachCapability = breachCapabilityFor(hostile, role);
 			int wallDamage = wallDamageFor(hostile, breachCapability);
-			if (breachCapability == BreachCapability.PRIMARY) {
-				primaryBreacherPositions.add(hostile.getPos());
-			}
-			if (fallbackBreachEnabled && breachCapability != BreachCapability.NONE) {
+			if (fallbackBreachEnabled && role != UnitRole.ESCORT && breachCapability != BreachCapability.NONE) {
 				controlFallbackBreacher(hostile, world, state, session, plan, objectivePos, wallDamage);
 				continue;
 			}
@@ -176,14 +179,10 @@ public final class SiegeUnitController {
 			moveToFormation(hostile, world, session);
 			return;
 		}
-		LivingEntity defenderTarget = getNearbyDefenderTarget(hostile, placedDefenders, breacherPositions, DEFENDER_SCREEN_RANGE);
-		if (defenderTarget != null) {
-			hostile.setTarget(defenderTarget);
-			return;
-		}
-		PlayerEntity playerTarget = getNearbyPlayer(world, hostile, RANGED_AGGRO_RANGE);
-		if (playerTarget != null) {
-			hostile.setTarget(playerTarget);
+		LivingEntity combatTarget = getNearestCombatTarget(world, hostile, placedDefenders, breacherPositions, RANGED_AGGRO_RANGE);
+		if (combatTarget != null) {
+			hostile.setTarget(combatTarget);
+			moveToward(hostile, world, combatTarget.getPos(), 0.95D);
 			return;
 		}
 		hostile.setTarget(null);
@@ -218,16 +217,10 @@ public final class SiegeUnitController {
 			moveToFormation(hostile, world, session);
 			return;
 		}
-		LivingEntity defenderTarget = getNearbyDefenderTarget(hostile, placedDefenders, breacherPositions, DEFENDER_SCREEN_RANGE);
-		if (defenderTarget != null) {
-			hostile.setTarget(defenderTarget);
-			moveToward(hostile, world, defenderTarget.getPos(), 1.0D);
-			return;
-		}
-		PlayerEntity playerTarget = getNearbyPlayer(world, hostile, PLAYER_AGGRO_RANGE);
-		if (playerTarget != null) {
-			hostile.setTarget(playerTarget);
-			moveToward(hostile, world, playerTarget.getPos(), 1.0D);
+		LivingEntity combatTarget = getNearestCombatTarget(world, hostile, placedDefenders, null, ESCORT_DEFENDER_RANGE);
+		if (combatTarget != null) {
+			hostile.setTarget(combatTarget);
+			moveToward(hostile, world, combatTarget.getPos(), 1.0D);
 			return;
 		}
 		hostile.setTarget(null);
@@ -249,7 +242,14 @@ public final class SiegeUnitController {
 
 		Vec3d breacherAnchor = average(breacherPositions);
 		if (breacherAnchor != null) {
-			moveToward(hostile, world, breacherAnchor, 1.0D);
+			Vec3d screenAnchor = offsetEscortAnchor(hostile, breacherAnchor);
+			moveToward(hostile, world, screenAnchor, 1.0D);
+			return;
+		}
+
+		Vec3d defenderAnchor = nearestDefenderPosition(hostile, placedDefenders);
+		if (defenderAnchor != null) {
+			moveToward(hostile, world, defenderAnchor, 1.0D);
 			return;
 		}
 
@@ -286,6 +286,53 @@ public final class SiegeUnitController {
 		if (hostile.age % 15 == 0) {
 			state.damageWall(world, targetBlock, Math.max(1, wallDamage));
 		}
+	}
+
+	private Map<UUID, UnitRole> deriveLiveRoleAssignments(ServerWorld world, SiegeSession session) {
+		Map<UUID, UnitRole> assignments = new HashMap<>();
+		List<UUID> nonBreacherAttackers = new ArrayList<>();
+		for (UUID attackerId : session.getAttackerIds()) {
+			Entity entity = world.getEntity(attackerId);
+			if (!(entity instanceof HostileEntity hostile) || !hostile.isAlive()) {
+				continue;
+			}
+			UnitRole seededRole = session.getRoleAssignments().getOrDefault(attackerId, UnitRole.RANGED);
+			BreachCapability capability = breachCapabilityFor(hostile, seededRole);
+			if (capability == BreachCapability.PRIMARY || seededRole == UnitRole.BREACHER) {
+				assignments.put(attackerId, UnitRole.BREACHER);
+			} else {
+				nonBreacherAttackers.add(attackerId);
+			}
+		}
+		nonBreacherAttackers.sort(Comparator.comparing(UUID::toString));
+		int screeningTarget = targetScreeningCount(nonBreacherAttackers.size());
+		for (int i = 0; i < nonBreacherAttackers.size(); i++) {
+			assignments.put(nonBreacherAttackers.get(i), i < screeningTarget ? UnitRole.ESCORT : UnitRole.RANGED);
+		}
+		return Map.copyOf(assignments);
+	}
+
+	private int targetScreeningCount(int nonBreacherCount) {
+		if (nonBreacherCount <= 1) {
+			return 0;
+		}
+		int target = Math.round(nonBreacherCount * 0.6F);
+		return Math.max(1, Math.min(nonBreacherCount - 1, target));
+	}
+
+	private List<Vec3d> primaryBreacherPositions(ServerWorld world, SiegeSession session, Map<UUID, UnitRole> assignments) {
+		List<Vec3d> positions = new ArrayList<>();
+		for (UUID attackerId : session.getAttackerIds()) {
+			Entity entity = world.getEntity(attackerId);
+			if (!(entity instanceof HostileEntity hostile) || !hostile.isAlive()) {
+				continue;
+			}
+			UnitRole role = assignments.getOrDefault(attackerId, UnitRole.RANGED);
+			if (breachCapabilityFor(hostile, role) == BreachCapability.PRIMARY) {
+				positions.add(hostile.getPos());
+			}
+		}
+		return positions;
 	}
 
 	private BlockPos firstIntactTarget(ServerWorld world, List<BlockPos> targets) {
@@ -394,6 +441,24 @@ public final class SiegeUnitController {
 	private LivingEntity getNearbyDefenderTarget(
 		HostileEntity hostile,
 		List<LivingEntity> placedDefenders,
+		double range
+	) {
+		LivingEntity nearest = null;
+		double bestDistance = range * range;
+		for (LivingEntity defender : placedDefenders) {
+			double attackerDistance = hostile.squaredDistanceTo(defender);
+			if (attackerDistance > bestDistance) {
+				continue;
+			}
+			bestDistance = attackerDistance;
+			nearest = defender;
+		}
+		return nearest;
+	}
+
+	private LivingEntity getNearbyDefenderTarget(
+		HostileEntity hostile,
+		List<LivingEntity> placedDefenders,
 		List<Vec3d> breacherPositions,
 		double range
 	) {
@@ -411,6 +476,38 @@ public final class SiegeUnitController {
 			nearest = defender;
 		}
 		return nearest;
+	}
+
+	private Vec3d nearestDefenderPosition(HostileEntity hostile, List<LivingEntity> placedDefenders) {
+		LivingEntity nearest = getNearbyDefenderTarget(hostile, placedDefenders, SCREEN_MOVE_RADIUS);
+		return nearest == null ? null : nearest.getPos();
+	}
+
+	private Vec3d offsetEscortAnchor(HostileEntity hostile, Vec3d breacherAnchor) {
+		int lane = Math.floorMod(hostile.getUuid().hashCode(), 3) - 1;
+		return breacherAnchor.add(1.75D * lane, 0.0D, 1.75D);
+	}
+
+	private LivingEntity getNearestCombatTarget(
+		ServerWorld world,
+		HostileEntity hostile,
+		List<LivingEntity> placedDefenders,
+		List<Vec3d> breacherPositions,
+		double range
+	) {
+		LivingEntity defenderTarget = breacherPositions == null
+			? getNearbyDefenderTarget(hostile, placedDefenders, range)
+			: getNearbyDefenderTarget(hostile, placedDefenders, breacherPositions, range);
+		PlayerEntity playerTarget = getNearbyPlayer(world, hostile, range);
+		if (defenderTarget == null) {
+			return playerTarget;
+		}
+		if (playerTarget == null) {
+			return defenderTarget;
+		}
+		double defenderDistance = hostile.squaredDistanceTo(defenderTarget);
+		double playerDistance = hostile.squaredDistanceTo(playerTarget);
+		return defenderDistance <= playerDistance ? defenderTarget : playerTarget;
 	}
 
 	private boolean isNearBreacherLine(Vec3d defenderPos, List<Vec3d> breacherPositions, double range) {
@@ -490,5 +587,37 @@ public final class SiegeUnitController {
 			return;
 		}
 		fallbackLoggedSessions.remove(sessionKey);
+	}
+
+	private void logLiveRoleBalance(ServerWorld world, SiegeSession session, Map<UUID, UnitRole> assignments) {
+		String sessionKey = session.getStartedGameTime() + ":" + String.valueOf(session.getObjectivePos());
+		int aliveBreachers = 0;
+		int aliveScreeners = 0;
+		int alivePressure = 0;
+		for (UUID attackerId : session.getAttackerIds()) {
+			Entity entity = world.getEntity(attackerId);
+			if (!(entity instanceof HostileEntity hostile) || !hostile.isAlive()) {
+				continue;
+			}
+			UnitRole role = assignments.getOrDefault(attackerId, UnitRole.RANGED);
+			if (role == UnitRole.BREACHER) {
+				aliveBreachers++;
+			} else if (role == UnitRole.ESCORT) {
+				aliveScreeners++;
+			} else {
+				alivePressure++;
+			}
+		}
+		String signature = aliveBreachers + ":" + aliveScreeners + ":" + alivePressure + ":" + session.getPhase().name();
+		if (!signature.equals(liveRoleBalanceSignatures.get(sessionKey))) {
+			liveRoleBalanceSignatures.put(sessionKey, signature);
+			AgesOfSiegeMod.LOGGER.info(
+				"Live role balance: aliveBreachers={}, aliveScreeners={}, alivePressure={}, phase={}.",
+				aliveBreachers,
+				aliveScreeners,
+				alivePressure,
+				session.getPhase()
+			);
+		}
 	}
 }

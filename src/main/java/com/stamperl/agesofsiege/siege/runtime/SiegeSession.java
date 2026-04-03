@@ -1,5 +1,6 @@
 package com.stamperl.agesofsiege.siege.runtime;
 
+import com.stamperl.agesofsiege.report.SiegeBattleStats;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtList;
@@ -30,6 +31,9 @@ public final class SiegeSession {
 	private final long lastObservationTick;
 	private final long lastPlanTick;
 	private final String fallbackReason;
+	private final UUID ownerPlayerUuid;
+	private final String ownerPlayerName;
+	private final SiegeBattleStats battleStats;
 
 	public SiegeSession(
 		SiegePhase phase,
@@ -48,7 +52,10 @@ public final class SiegeSession {
 		BattlefieldObservation lastObservation,
 		long lastObservationTick,
 		long lastPlanTick,
-		String fallbackReason
+		String fallbackReason,
+		UUID ownerPlayerUuid,
+		String ownerPlayerName,
+		SiegeBattleStats battleStats
 	) {
 		this.phase = phase;
 		this.sessionAgeLevel = sessionAgeLevel;
@@ -67,6 +74,9 @@ public final class SiegeSession {
 		this.lastObservationTick = lastObservationTick;
 		this.lastPlanTick = lastPlanTick;
 		this.fallbackReason = fallbackReason;
+		this.ownerPlayerUuid = ownerPlayerUuid;
+		this.ownerPlayerName = ownerPlayerName == null ? "" : ownerPlayerName.trim();
+		this.battleStats = battleStats == null ? SiegeBattleStats.empty() : battleStats;
 	}
 
 	public SiegePhase getPhase() {
@@ -137,6 +147,18 @@ public final class SiegeSession {
 		return fallbackReason;
 	}
 
+	public UUID getOwnerPlayerUuid() {
+		return ownerPlayerUuid;
+	}
+
+	public String getOwnerPlayerName() {
+		return ownerPlayerName;
+	}
+
+	public SiegeBattleStats getBattleStats() {
+		return battleStats;
+	}
+
 	public NbtCompound toNbt() {
 		NbtCompound nbt = new NbtCompound();
 		nbt.putString("phase", phase.name());
@@ -162,6 +184,13 @@ public final class SiegeSession {
 		if (fallbackReason != null) {
 			nbt.putString("fallbackReason", fallbackReason);
 		}
+		if (ownerPlayerUuid != null) {
+			nbt.putUuid("ownerPlayerUuid", ownerPlayerUuid);
+		}
+		if (!ownerPlayerName.isBlank()) {
+			nbt.putString("ownerPlayerName", ownerPlayerName);
+		}
+		nbt.put("battleStats", battleStats.toNbt());
 		return nbt;
 	}
 
@@ -185,7 +214,10 @@ public final class SiegeSession {
 				: null,
 			nbt.getLong("lastObservationTick"),
 			nbt.getLong("lastPlanTick"),
-			nbt.contains("fallbackReason", NbtElement.STRING_TYPE) ? nbt.getString("fallbackReason") : null
+			nbt.contains("fallbackReason", NbtElement.STRING_TYPE) ? nbt.getString("fallbackReason") : null,
+			nbt.containsUuid("ownerPlayerUuid") ? nbt.getUuid("ownerPlayerUuid") : null,
+			nbt.contains("ownerPlayerName", NbtElement.STRING_TYPE) ? nbt.getString("ownerPlayerName") : "",
+			nbt.contains("battleStats", NbtElement.COMPOUND_TYPE) ? SiegeBattleStats.fromNbt(nbt.getCompound("battleStats")) : SiegeBattleStats.empty()
 		);
 	}
 

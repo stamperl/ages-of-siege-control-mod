@@ -29,19 +29,10 @@ public record SiegeCampaignNode(
 	}
 
 	public boolean isUnlocked(SiegeBaseState state) {
-		if (state == null) {
-			return false;
-		}
-		if (ageLevel < state.getAgeLevel()) {
-			return true;
-		}
-		if (ageLevel > state.getAgeLevel()) {
-			return false;
-		}
-		return state.getCurrentAgeRegularWins() >= requiredRegularWins;
+		return SiegeCatalog.isNodeUnlocked(state, this);
 	}
 
 	public boolean isReplay(SiegeBaseState state) {
-		return state != null && ageLevel < state.getAgeLevel();
+		return state != null && SiegeCatalog.isNodeReplay(state, this);
 	}
 }

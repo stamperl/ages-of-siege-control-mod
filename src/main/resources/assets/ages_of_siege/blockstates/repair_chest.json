@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "ages_of_siege:block/repair_chest", "y": 180 },
+    "facing=east": { "model": "ages_of_siege:block/repair_chest", "y": 270 },
+    "facing=south": { "model": "ages_of_siege:block/repair_chest" },
+    "facing=west": { "model": "ages_of_siege:block/repair_chest", "y": 90 }
+  }
+}

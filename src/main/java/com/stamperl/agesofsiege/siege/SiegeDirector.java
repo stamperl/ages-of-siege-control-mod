@@ -1,5 +1,6 @@
 package com.stamperl.agesofsiege.siege;
 
+import com.stamperl.agesofsiege.report.SiegeWarReportService;
 import com.stamperl.agesofsiege.siege.runtime.BattlefieldObservation;
 import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
 import com.stamperl.agesofsiege.siege.runtime.SiegePlan;
@@ -16,6 +17,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
@@ -45,17 +47,25 @@ public final class SiegeDirector {
 	}
 
 	public static boolean startSiege(MinecraftServer server, SiegeBaseState state) {
+		return startSiege(server, state, null);
+	}
+
+	public static boolean startSiege(MinecraftServer server, SiegeBaseState state, ServerPlayerEntity owner) {
 		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.resolveForState(state, state.getSelectedSiegeId());
 		if (definition == null || !definition.isUnlocked(state)) {
 			definition = SiegeCatalog.resolveForState(state, SiegeCatalog.highestUnlocked(state).id());
 		}
-		if (!lockSiegeFromLedger(server, state, definition)) {
+		if (!lockSiegeFromLedger(server, state, owner, definition)) {
 			return false;
 		}
 		return startLockedSiege(server, state);
 	}
 
 	public static boolean lockSiegeFromLedger(MinecraftServer server, SiegeBaseState state, SiegeCatalog.SiegeDefinition definition) {
+		return lockSiegeFromLedger(server, state, null, definition);
+	}
+
+	public static boolean lockSiegeFromLedger(MinecraftServer server, SiegeBaseState state, ServerPlayerEntity owner, SiegeCatalog.SiegeDefinition definition) {
 		if (!state.hasBase() || state.getActiveSession() != null) {
 			return false;
 		}
@@ -71,7 +81,13 @@ public final class SiegeDirector {
 			return false;
 		}
 		state.setSelectedSiegeId(definition.id());
-		state.prepareStagedSiege(server, definition.id(), definition.ageLevel());
+		state.prepareStagedSiege(
+			server,
+			definition.id(),
+			definition.ageLevel(),
+			owner == null ? null : owner.getUuid(),
+			owner == null ? "" : owner.getGameProfile().getName()
+		);
 		SPAWNER.spawnWave(server, world, state, state.getActiveSession(), definition);
 		return true;
 	}
@@ -128,7 +144,7 @@ public final class SiegeDirector {
 			return;
 		}
 		if (!OBJECTIVE_SERVICE.isObjectivePresent(world, session, objectivePos)) {
-			transitionToDefeat(world, state, "The Settlement Standard was destroyed. The siege is lost.");
+			transitionToDefeat(world, state, session, "The Settlement Standard was destroyed. The siege is lost.");
 			return;
 		}
 
@@ -267,17 +283,17 @@ public final class SiegeDirector {
 
 	private static void resolveOutcome(ServerWorld world, MinecraftServer server, SiegeBaseState state, SiegeSession session, BlockPos objectivePos) {
 		if (!OBJECTIVE_SERVICE.isObjectivePresent(world, session, objectivePos)) {
-			transitionToDefeat(world, state, "The Settlement Standard was destroyed. The siege is lost.");
+			transitionToDefeat(world, state, session, "The Settlement Standard was destroyed. The siege is lost.");
 			return;
 		}
 		if (session.getAttackerIds().isEmpty() && session.getEngineIds().isEmpty()) {
 			int previousAge = state.getAgeLevel();
 			int siegeAgeLevel = session.getSessionAgeLevel();
 			SiegeCatalog.SiegeDefinition definition = SiegeCatalog.resolveForState(state, state.getSelectedSiegeId());
-			REWARDS.dropVictoryRewards(world, session, objectivePos, siegeAgeLevel, state.getSelectedSiegeId());
+			boolean replay = definition != null && state.hasCompletedSiege(definition.id());
+			SiegeWarReportService.finalizeVictory(server, state, session, definition);
 			state.endSiege(false, false);
 			boolean advancedAge = state.recordSiegeVictory(definition);
-			boolean replay = definition != null && definition.isReplay(state);
 			server.getPlayerManager().broadcast(Text.literal(replay
 				? "Replay siege defeated. Rewards drop, but age progress is unchanged."
 				: (definition != null && definition.ageDefining()
@@ -320,10 +336,12 @@ public final class SiegeDirector {
 		}
 	}
 
-	private static void transitionToDefeat(ServerWorld world, SiegeBaseState state, String message) {
+	private static void transitionToDefeat(ServerWorld world, SiegeBaseState state, SiegeSession session, String message) {
 		SPAWNER.despawnAttackers(world, state.getAttackerIds());
 		SPAWNER.despawnRams(world, state.getRamIds());
+		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.resolveForState(state, state.getSelectedSiegeId());
 		state.endSiege(true, false);
+		SiegeWarReportService.finalizeDefeat(world.getServer(), state, session, definition, message);
 		world.getServer().getPlayerManager().broadcast(Text.literal(message), false);
 	}
 
@@ -384,7 +402,10 @@ public final class SiegeDirector {
 			observation,
 			lastObservationTick,
 			lastPlanTick,
-			fallbackReason
+			fallbackReason,
+			session.getOwnerPlayerUuid(),
+			session.getOwnerPlayerName(),
+			session.getBattleStats()
 		);
 	}
 

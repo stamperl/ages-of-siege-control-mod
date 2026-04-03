@@ -1,6 +1,5 @@
 package com.stamperl.agesofsiege.defense;
 
-import com.stamperl.agesofsiege.item.ModItems;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -30,10 +29,11 @@ public class DefenderRecallToolItem extends Item {
 			return ActionResult.FAIL;
 		}
 
-		ItemStack tokenStack = switch (placedDefender.role()) {
-			case ARCHER -> new ItemStack(ModItems.ARCHER_TOKEN);
-			case SOLDIER -> new ItemStack(ModItems.SOLDIER_TOKEN);
-		};
+		ItemStack tokenStack = DefenderTokenData.createTokenStack(
+			placedDefender.role(),
+			DefenderTokenData.captureEntityState(placedDefender.tokenData(), entity, placedDefender.role(), false),
+			false
+		);
 
 		state.removePlacedDefender(entity.getUuid());
 		entity.discard();

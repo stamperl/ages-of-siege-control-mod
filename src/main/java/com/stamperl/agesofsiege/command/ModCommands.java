@@ -127,7 +127,7 @@ public final class ModCommands {
 			return 0;
 		}
 
-		if (!SiegeDirector.startSiege(player.getServer(), state)) {
+		if (!SiegeDirector.startSiege(player.getServer(), state, player)) {
 			player.sendMessage(Text.literal("Could not start the siege. Make sure the objective and rally banner exist and no siege is already active.")
 				.formatted(Formatting.RED), false);
 			return 0;

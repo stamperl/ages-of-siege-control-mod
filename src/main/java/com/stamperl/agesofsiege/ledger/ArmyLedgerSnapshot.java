@@ -2,6 +2,7 @@ package com.stamperl.agesofsiege.ledger;
 
 import com.stamperl.agesofsiege.defense.DefenderRole;
 import com.stamperl.agesofsiege.siege.runtime.UnitRole;
+import com.stamperl.agesofsiege.siege.service.SiegeRewardService;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.math.BlockPos;
 
@@ -26,6 +27,7 @@ public record ArmyLedgerSnapshot(
 	int ageProgressTarget,
 	int nextAgeRequirement,
 	String selectedSiegeId,
+	boolean hasPendingWarReport,
 	boolean siegeLocked,
 	boolean canLockSiege,
 	boolean canStartSiege,
@@ -51,6 +53,7 @@ public record ArmyLedgerSnapshot(
 		buf.writeVarInt(ageProgressTarget);
 		buf.writeVarInt(nextAgeRequirement);
 		buf.writeString(selectedSiegeId);
+		buf.writeBoolean(hasPendingWarReport);
 		buf.writeBoolean(siegeLocked);
 		buf.writeBoolean(canLockSiege);
 		buf.writeBoolean(canStartSiege);
@@ -86,6 +89,7 @@ public record ArmyLedgerSnapshot(
 		int ageProgressTarget = buf.readVarInt();
 		int nextAgeRequirement = buf.readVarInt();
 		String selectedSiegeId = buf.readString();
+		boolean hasPendingWarReport = buf.readBoolean();
 		boolean siegeLocked = buf.readBoolean();
 		boolean canLockSiege = buf.readBoolean();
 		boolean canStartSiege = buf.readBoolean();
@@ -122,6 +126,7 @@ public record ArmyLedgerSnapshot(
 			ageProgressTarget,
 			nextAgeRequirement,
 			selectedSiegeId,
+			hasPendingWarReport,
 			siegeLocked,
 			canLockSiege,
 			canStartSiege,
@@ -151,7 +156,9 @@ public record ArmyLedgerSnapshot(
 		String breachSummary,
 		int warSuppliesReward,
 		String battleProfileId,
-		List<BattleGroupEntry> battleGroups
+		List<BattleGroupEntry> battleGroups,
+		List<RewardPreviewEntry> firstClearRewardPreview,
+		List<RewardPreviewEntry> rerunRewardPreview
 	) {
 		public void write(PacketByteBuf buf) {
 			buf.writeString(id);
@@ -175,6 +182,14 @@ public record ArmyLedgerSnapshot(
 			buf.writeVarInt(battleGroups.size());
 			for (BattleGroupEntry group : battleGroups) {
 				group.write(buf);
+			}
+			buf.writeVarInt(firstClearRewardPreview.size());
+			for (RewardPreviewEntry reward : firstClearRewardPreview) {
+				reward.write(buf);
+			}
+			buf.writeVarInt(rerunRewardPreview.size());
+			for (RewardPreviewEntry reward : rerunRewardPreview) {
+				reward.write(buf);
 			}
 		}
 
@@ -202,6 +217,16 @@ public record ArmyLedgerSnapshot(
 			for (int i = 0; i < battleGroupCount; i++) {
 				battleGroups.add(BattleGroupEntry.read(buf));
 			}
+			int firstRewardCount = buf.readVarInt();
+			List<RewardPreviewEntry> firstClearRewardPreview = new ArrayList<>();
+			for (int i = 0; i < firstRewardCount; i++) {
+				firstClearRewardPreview.add(RewardPreviewEntry.read(buf));
+			}
+			int rerunRewardCount = buf.readVarInt();
+			List<RewardPreviewEntry> rerunRewardPreview = new ArrayList<>();
+			for (int i = 0; i < rerunRewardCount; i++) {
+				rerunRewardPreview.add(RewardPreviewEntry.read(buf));
+			}
 			return new SiegeEntry(
 				id,
 				name,
@@ -221,7 +246,55 @@ public record ArmyLedgerSnapshot(
 				breachSummary,
 				warSuppliesReward,
 				battleProfileId,
-				battleGroups
+				battleGroups,
+				firstClearRewardPreview,
+				rerunRewardPreview
+			);
+		}
+	}
+
+	public record RewardPreviewEntry(
+		String itemId,
+		String displayName,
+		int count,
+		boolean ageGear,
+		boolean rerunReduced,
+		boolean tokenReturn
+	) {
+		public RewardPreviewEntry {
+			itemId = itemId == null ? "" : itemId;
+			displayName = displayName == null ? "" : displayName;
+			count = Math.max(0, count);
+		}
+
+		public static RewardPreviewEntry fromService(SiegeRewardService.RewardPreviewEntry entry) {
+			return new RewardPreviewEntry(
+				entry.itemId(),
+				entry.displayName(),
+				entry.count(),
+				entry.ageGear(),
+				entry.rerunReduced(),
+				entry.tokenReturn()
+			);
+		}
+
+		public void write(PacketByteBuf buf) {
+			buf.writeString(itemId);
+			buf.writeString(displayName);
+			buf.writeVarInt(count);
+			buf.writeBoolean(ageGear);
+			buf.writeBoolean(rerunReduced);
+			buf.writeBoolean(tokenReturn);
+		}
+
+		public static RewardPreviewEntry read(PacketByteBuf buf) {
+			return new RewardPreviewEntry(
+				buf.readString(),
+				buf.readString(),
+				buf.readVarInt(),
+				buf.readBoolean(),
+				buf.readBoolean(),
+				buf.readBoolean()
 			);
 		}
 	}

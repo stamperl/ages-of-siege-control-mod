@@ -1,9 +1,11 @@
 package com.stamperl.agesofsiege.item;
 
 import com.stamperl.agesofsiege.AgesOfSiegeMod;
+import com.stamperl.agesofsiege.block.ModBlocks;
 import com.stamperl.agesofsiege.defense.DefenderRecallToolItem;
 import com.stamperl.agesofsiege.defense.DefenderRole;
 import com.stamperl.agesofsiege.defense.DefenderSpawnerService;
+import com.stamperl.agesofsiege.defense.DefenderTokenData;
 import com.stamperl.agesofsiege.defense.DefenderTokenItem;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.minecraft.item.Item;
@@ -33,11 +35,11 @@ public final class ModItems {
 	);
 	public static final Item ARCHER_TOKEN = register(
 		"archer_token",
-		new DefenderTokenItem(new Item.Settings().maxCount(16), DEFENDER_SPAWNER, DefenderRole.ARCHER)
+		new DefenderTokenItem(new Item.Settings().maxDamage(DefenderTokenData.maxDamage()), DEFENDER_SPAWNER, DefenderRole.ARCHER)
 	);
 	public static final Item SOLDIER_TOKEN = register(
 		"soldier_token",
-		new DefenderTokenItem(new Item.Settings().maxCount(16), DEFENDER_SPAWNER, DefenderRole.SOLDIER)
+		new DefenderTokenItem(new Item.Settings().maxDamage(DefenderTokenData.maxDamage()), DEFENDER_SPAWNER, DefenderRole.SOLDIER)
 	);
 	public static final Item DEFENDER_RECALL_TOOL = register(
 		"defender_recall_tool",
@@ -52,6 +54,7 @@ public final class ModItems {
 			entries.add(SETTLEMENT_STANDARD);
 			entries.add(RAID_RALLY_BANNER);
 			entries.add(ARMY_LEDGER);
+			entries.add(ModBlocks.REPAIR_CHEST_ITEM);
 		});
 		ItemGroupEvents.modifyEntriesEvent(ItemGroups.INGREDIENTS).register(entries -> {
 			entries.add(WAR_SUPPLIES);

@@ -3,12 +3,15 @@ package com.stamperl.agesofsiege.ledger;
 import com.stamperl.agesofsiege.AgesOfSiegeMod;
 import com.stamperl.agesofsiege.defense.DefenderRole;
 import com.stamperl.agesofsiege.defense.DefenderSpawnerService;
+import com.stamperl.agesofsiege.defense.DefenderTokenData;
+import com.stamperl.agesofsiege.report.SiegeWarReportService;
 import com.stamperl.agesofsiege.siege.SiegeBattleCatalog;
 import com.stamperl.agesofsiege.siege.SiegeCatalog;
 import com.stamperl.agesofsiege.siege.SiegeDirector;
 import com.stamperl.agesofsiege.siege.runtime.SiegeBattlePlan;
 import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
 import com.stamperl.agesofsiege.siege.runtime.UnitRole;
+import com.stamperl.agesofsiege.siege.service.SiegeRewardService;
 import com.stamperl.agesofsiege.state.PlacedDefender;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -40,7 +43,9 @@ public final class ArmyLedgerService {
 	public static final Identifier LOCK_SIEGE_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_lock_siege");
 	public static final Identifier START_SIEGE_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_start_siege");
 	public static final Identifier CANCEL_SIEGE_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_cancel_siege");
+	public static final Identifier REOPEN_REPORT_PACKET = new Identifier(AgesOfSiegeMod.MOD_ID, "army_ledger_reopen_report");
 	private static final List<HighlightState> ACTIVE_HIGHLIGHTS = new ArrayList<>();
+	private static final SiegeRewardService REWARDS = new SiegeRewardService();
 
 	private ArmyLedgerService() {
 	}
@@ -83,6 +88,8 @@ public final class ArmyLedgerService {
 				cancelStagedSiege(player);
 				openLedger(player);
 			}));
+		ServerPlayNetworking.registerGlobalReceiver(REOPEN_REPORT_PACKET, (server, player, handler, buf, responseSender) ->
+			server.execute(() -> SiegeWarReportService.tryOpenPendingReportFromLedger(player)));
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			Iterator<HighlightState> iterator = ACTIVE_HIGHLIGHTS.iterator();
 			while (iterator.hasNext()) {
@@ -146,6 +153,7 @@ public final class ArmyLedgerService {
 			state.getRegularWinsPerAge(),
 			state.getNextAgeSiegeRequirement(),
 			selectedSiege == null ? "" : selectedSiege.id(),
+			hasPendingReportFor(player, state),
 			siegeLocked,
 			canLockSiege,
 			canStartSiege,
@@ -154,6 +162,10 @@ public final class ArmyLedgerService {
 			defenders,
 			attackers
 		);
+	}
+
+	private static boolean hasPendingReportFor(ServerPlayerEntity player, SiegeBaseState state) {
+		return SiegeWarReportService.canReopenPendingReport(player, state);
 	}
 
 	private static List<ArmyLedgerSnapshot.DefenderEntry> buildDefenderEntries(ServerPlayerEntity player, SiegeBaseState state) {
@@ -167,7 +179,7 @@ public final class ArmyLedgerService {
 			float maxHealth = living == null ? 0.0F : living.getMaxHealth();
 			String defenderName = defender.defenderName() != null
 				? defender.defenderName()
-				: defender.role().displayName() + " Guard";
+				: DefenderTokenData.displayName(defender.tokenData(), defender.role());
 			defenders.add(new ArmyLedgerSnapshot.DefenderEntry(
 				defender.entityUuid(),
 				living == null ? -1 : living.getId(),
@@ -208,10 +220,23 @@ public final class ArmyLedgerService {
 				preview.breachSummary(),
 				definition.warSuppliesReward(),
 				preview.profileId(),
-				preview.battleGroups()
+				preview.battleGroups(),
+				buildRewardPreviewEntries(state, definition, false),
+				buildRewardPreviewEntries(state, definition, true)
 			));
 		}
 		return sieges;
+	}
+
+	private static List<ArmyLedgerSnapshot.RewardPreviewEntry> buildRewardPreviewEntries(SiegeBaseState state, SiegeCatalog.SiegeDefinition definition, boolean rerun) {
+		long progressionSeed = (((long) state.getAgeLevel()) << 32)
+			^ state.getCompletedSieges()
+			^ state.getCurrentAgeRegularWins()
+			^ state.getCompletedSiegeIds().hashCode();
+		long previewSeed = REWARDS.previewSeed(definition.ageLevel(), definition.id(), rerun, progressionSeed);
+		return REWARDS.buildRewardPreview(definition.ageLevel(), definition.id(), rerun, previewSeed).stream()
+			.map(ArmyLedgerSnapshot.RewardPreviewEntry::fromService)
+			.toList();
 	}
 
 	private static BattlePreview resolveBattlePreview(SiegeBaseState state, SiegeCatalog.SiegeDefinition definition) {
@@ -401,7 +426,7 @@ public final class ArmyLedgerService {
 				return "Clear the current age siege to unlock the next age route.";
 			}
 			if (selectedSiege.ageDefining()) {
-				return "Win " + selectedSiege.requiredRegularWins() + " regular sieges in this age to unlock the age siege.";
+				return "Clear every raid in this age route to unlock the age siege.";
 			}
 			return "That siege is not unlocked yet.";
 		}
@@ -434,7 +459,7 @@ public final class ArmyLedgerService {
 			return;
 		}
 		state.setSelectedSiegeId(definition.id());
-		if (!SiegeDirector.lockSiegeFromLedger(player.getServer(), state, definition)) {
+		if (!SiegeDirector.lockSiegeFromLedger(player.getServer(), state, player, definition)) {
 			player.sendMessage(Text.literal("Could not lock that siege. Check the settlement banner, rally banner, and current siege state.").formatted(Formatting.RED), true);
 			return;
 		}
@@ -477,7 +502,8 @@ public final class ArmyLedgerService {
 			return;
 		}
 		String trimmed = requestedName == null ? "" : requestedName.trim();
-		String finalName = trimmed.isEmpty() ? placedDefender.role().displayName() + " Guard" : trimmed;
+		String finalName = trimmed.isEmpty() ? DefenderTokenData.displayName(placedDefender.tokenData(), placedDefender.role()) : trimmed;
+		var updatedTokenData = DefenderTokenData.withManualName(placedDefender.tokenData(), placedDefender.role(), finalName);
 		ServerWorld defenderWorld = player.getServer().getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, new Identifier(placedDefender.dimensionId())));
 		if (defenderWorld != null) {
 			Entity entity = defenderWorld.getEntity(defenderId);
@@ -496,7 +522,8 @@ public final class ArmyLedgerService {
 			placedDefender.settlementDimensionId(),
 			placedDefender.ownerName(),
 			placedDefender.ownerUuid(),
-			finalName
+			finalName,
+			updatedTokenData
 		));
 	}
 
@@ -510,13 +537,13 @@ public final class ArmyLedgerService {
 		if (newRole == null || newRole == placedDefender.role()) {
 			return;
 		}
+		var updatedTokenData = DefenderTokenData.withRoleAndStarterLoadout(placedDefender.tokenData(), newRole, SiegeBaseState.get(player.getServer()).getAgeLevel());
 		ServerWorld defenderWorld = player.getServer().getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, new Identifier(placedDefender.dimensionId())));
 		if (defenderWorld != null) {
 			Entity entity = defenderWorld.getEntity(defenderId);
 			if (entity instanceof LivingEntity living) {
 				living.addCommandTag(newRole.entityTag());
-				DefenderSpawnerService.applyRoleLoadout(living, newRole);
-				DefenderSpawnerService.applyDisplayName(living, placedDefender.defenderName() == null ? newRole.displayName() + " Guard" : placedDefender.defenderName());
+				DefenderTokenData.applyToEntity(living, updatedTokenData, newRole);
 				if (living instanceof MobEntity mob) {
 					mob.setTarget(null);
 					mob.getNavigation().stop();
@@ -534,7 +561,8 @@ public final class ArmyLedgerService {
 			placedDefender.settlementDimensionId(),
 			placedDefender.ownerName(),
 			placedDefender.ownerUuid(),
-			placedDefender.defenderName() == null ? newRole.displayName() + " Guard" : placedDefender.defenderName()
+			DefenderTokenData.displayName(updatedTokenData, newRole),
+			updatedTokenData
 		));
 	}
 

@@ -1,5 +1,7 @@
 package com.stamperl.agesofsiege.state;
 
+import com.stamperl.agesofsiege.report.SiegeBattleStats;
+import com.stamperl.agesofsiege.report.SiegeResultReport;
 import com.stamperl.agesofsiege.siege.SiegeCatalog;
 import com.stamperl.agesofsiege.siege.WallTier;
 import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
@@ -26,10 +28,12 @@ import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.HashMap;
+import java.util.Set;
 import java.util.function.UnaryOperator;
 
 public class SiegeBaseState extends PersistentState {
@@ -53,7 +57,10 @@ public class SiegeBaseState extends PersistentState {
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
 	private final Map<Long, Integer> wallHealth = new HashMap<>();
 	private final List<PlacedDefender> placedDefenders = new ArrayList<>();
+	private final Set<String> completedSiegeIds = new LinkedHashSet<>();
 	private SiegeSession activeSession;
+	private SiegeResultReport pendingReport;
+	private long nextReportId = 1L;
 
 	// Temporary compatibility shims until the old SiegeManager is replaced by SiegeDirector.
 	private transient boolean assaultModePrimedCompat;
@@ -104,12 +111,26 @@ public class SiegeBaseState extends PersistentState {
 		for (NbtElement element : defenderList) {
 			state.placedDefenders.add(PlacedDefender.fromNbt((NbtCompound) element));
 		}
+		NbtList completedList = nbt.getList("completedSiegeIds", NbtElement.STRING_TYPE);
+		for (NbtElement element : completedList) {
+			String id = element.asString();
+			if (id != null && !id.isBlank()) {
+				state.completedSiegeIds.add(id);
+			}
+		}
+		if (state.completedSiegeIds.isEmpty()) {
+			state.migrateCompletedSiegeIdsFromLegacyProgress();
+		}
 
 		if (nbt.contains("activeSession", NbtElement.COMPOUND_TYPE)) {
 			state.activeSession = SiegeSession.fromNbt(nbt.getCompound("activeSession"));
 		} else {
 			state.activeSession = migrateLegacySession(nbt, state);
 		}
+		if (nbt.contains("pendingReport", NbtElement.COMPOUND_TYPE)) {
+			state.pendingReport = SiegeResultReport.fromNbt(nbt.getCompound("pendingReport"));
+		}
+		state.nextReportId = nbt.contains("nextReportId") ? Math.max(1L, nbt.getLong("nextReportId")) : 1L;
 
 		state.assaultModePrimedCompat = nbt.getBoolean("assaultModePrimed");
 		state.rushTicksCompat = nbt.getInt("rushTicks");
@@ -167,7 +188,10 @@ public class SiegeBaseState extends PersistentState {
 			null,
 			0L,
 			0L,
-			null
+			null,
+			null,
+			"",
+			SiegeBattleStats.empty()
 		);
 	}
 
@@ -188,6 +212,7 @@ public class SiegeBaseState extends PersistentState {
 		this.siegeFailed = false;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.activeSession = null;
+		this.pendingReport = null;
 		resetCompatRuntime();
 		markDirty();
 	}
@@ -203,6 +228,7 @@ public class SiegeBaseState extends PersistentState {
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.wallHealth.clear();
 		this.activeSession = null;
+		this.pendingReport = null;
 		resetCompatRuntime();
 		markDirty();
 	}
@@ -318,7 +344,10 @@ public class SiegeBaseState extends PersistentState {
 			session.getLastObservation(),
 			session.getLastObservationTick(),
 			session.getLastPlanTick(),
-			session.getFallbackReason()
+			session.getFallbackReason(),
+			session.getOwnerPlayerUuid(),
+			session.getOwnerPlayerName(),
+			session.getBattleStats()
 		));
 	}
 
@@ -383,7 +412,10 @@ public class SiegeBaseState extends PersistentState {
 			session.getLastObservation(),
 			session.getLastObservationTick(),
 			session.getLastPlanTick(),
-			session.getFallbackReason()
+			session.getFallbackReason(),
+			session.getOwnerPlayerUuid(),
+			session.getOwnerPlayerName(),
+			session.getBattleStats()
 		));
 	}
 
@@ -454,6 +486,7 @@ public class SiegeBaseState extends PersistentState {
 		this.selectedSiegeId = SiegeCatalog.defaultSiegeForAge(0).id();
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
 		this.wallHealth.clear();
+		this.pendingReport = null;
 		resetCompatRuntime();
 		markDirty();
 	}
@@ -491,7 +524,10 @@ public class SiegeBaseState extends PersistentState {
 			session.getLastObservation(),
 			session.getLastObservationTick(),
 			session.getLastPlanTick(),
-			session.getFallbackReason()
+			session.getFallbackReason(),
+			session.getOwnerPlayerUuid(),
+			session.getOwnerPlayerName(),
+			session.getBattleStats()
 		));
 	}
 
@@ -517,7 +553,10 @@ public class SiegeBaseState extends PersistentState {
 			session.getLastObservation(),
 			session.getLastObservationTick(),
 			session.getLastPlanTick(),
-			session.getFallbackReason()
+			session.getFallbackReason(),
+			session.getOwnerPlayerUuid(),
+			session.getOwnerPlayerName(),
+			session.getBattleStats()
 		));
 	}
 
@@ -565,7 +604,10 @@ public class SiegeBaseState extends PersistentState {
 			null,
 			0L,
 			0L,
-			null
+			null,
+			null,
+			"",
+			SiegeBattleStats.empty()
 		);
 		server.getPlayerManager().broadcast(
 			Text.literal("A siege is approaching. Defend the Settlement Standard."),
@@ -574,7 +616,7 @@ public class SiegeBaseState extends PersistentState {
 		markDirty();
 	}
 
-	public void prepareStagedSiege(MinecraftServer server, String siegeId, int siegeAgeLevel) {
+	public void prepareStagedSiege(MinecraftServer server, String siegeId, int siegeAgeLevel, UUID ownerUuid, String ownerName) {
 		this.siegeFailed = false;
 		this.selectedSiegeId = siegeId == null || siegeId.isBlank() ? DEFAULT_SIEGE_ID : siegeId;
 		this.objectiveHealth = MAX_OBJECTIVE_HEALTH;
@@ -598,7 +640,10 @@ public class SiegeBaseState extends PersistentState {
 			null,
 			0L,
 			0L,
-			null
+			null,
+			null,
+			"",
+			SiegeBattleStats.empty()
 		);
 		markDirty();
 	}
@@ -626,7 +671,10 @@ public class SiegeBaseState extends PersistentState {
 			activeSession.getLastObservation(),
 			activeSession.getLastObservationTick(),
 			activeSession.getLastPlanTick(),
-			activeSession.getFallbackReason()
+			activeSession.getFallbackReason(),
+			activeSession.getOwnerPlayerUuid(),
+			activeSession.getOwnerPlayerName(),
+			activeSession.getBattleStats()
 		);
 		markDirty();
 		return (int) Math.max(0L, remaining - 1L);
@@ -658,7 +706,10 @@ public class SiegeBaseState extends PersistentState {
 			session.getLastObservation(),
 			session.getLastObservationTick(),
 			session.getLastPlanTick(),
-			session.getFallbackReason()
+			session.getFallbackReason(),
+			session.getOwnerPlayerUuid(),
+			session.getOwnerPlayerName(),
+			session.getBattleStats()
 		));
 		markDirty();
 	}
@@ -683,7 +734,10 @@ public class SiegeBaseState extends PersistentState {
 			null,
 			0L,
 			0L,
-			null
+			null,
+			null,
+			"",
+			SiegeBattleStats.empty()
 		);
 		this.siegeFailed = false;
 		this.assaultModePrimedCompat = false;
@@ -717,7 +771,10 @@ public class SiegeBaseState extends PersistentState {
 			activeSession.getLastObservation(),
 			activeSession.getLastObservationTick(),
 			activeSession.getLastPlanTick(),
-			activeSession.getFallbackReason()
+			activeSession.getFallbackReason(),
+			activeSession.getOwnerPlayerUuid(),
+			activeSession.getOwnerPlayerName(),
+			activeSession.getBattleStats()
 		);
 		this.siegeFailed = false;
 		this.assaultModePrimedCompat = false;
@@ -739,10 +796,14 @@ public class SiegeBaseState extends PersistentState {
 
 	public boolean recordSiegeVictory(SiegeCatalog.SiegeDefinition definition) {
 		this.completedSieges++;
+		if (definition != null) {
+			this.completedSiegeIds.add(definition.id());
+		}
 		boolean advancedAge = false;
 		if (definition != null && definition.ageLevel() == this.ageLevel) {
+			recomputeCurrentAgeRegularWins();
 			if (definition.ageDefining()) {
-				if (this.currentAgeRegularWins >= REGULAR_WINS_PER_AGE && this.ageLevel < AGE_NAMES.length - 1) {
+				if (hasCompletedAllRegularSiegesForAge(this.ageLevel) && this.ageLevel < AGE_NAMES.length - 1) {
 					this.ageLevel++;
 					this.currentAgeRegularWins = 0;
 					this.selectedSiegeId = SiegeCatalog.defaultSiegeForAge(this.ageLevel).id();
@@ -750,6 +811,10 @@ public class SiegeBaseState extends PersistentState {
 				}
 			} else {
 				this.currentAgeRegularWins = Math.min(REGULAR_WINS_PER_AGE, this.currentAgeRegularWins + 1);
+				SiegeCatalog.SiegeDefinition next = SiegeCatalog.nextSequentialSiege(this, definition.id());
+				if (next != null) {
+					this.selectedSiegeId = next.id();
+				}
 			}
 		}
 		markDirty();
@@ -848,6 +913,10 @@ public class SiegeBaseState extends PersistentState {
 		if (activeSession != null) {
 			nbt.put("activeSession", activeSession.toNbt());
 		}
+		if (pendingReport != null) {
+			nbt.put("pendingReport", pendingReport.toNbt());
+		}
+		nbt.putLong("nextReportId", nextReportId);
 		NbtList wallList = new NbtList();
 		for (Map.Entry<Long, Integer> entry : wallHealth.entrySet()) {
 			NbtCompound wallEntry = new NbtCompound();
@@ -861,6 +930,11 @@ public class SiegeBaseState extends PersistentState {
 			defenderList.add(defender.toNbt());
 		}
 		nbt.put("placedDefenders", defenderList);
+		NbtList completedList = new NbtList();
+		for (String siegeId : completedSiegeIds) {
+			completedList.add(net.minecraft.nbt.NbtString.of(siegeId));
+		}
+		nbt.put("completedSiegeIds", completedList);
 		return nbt;
 	}
 
@@ -894,7 +968,10 @@ public class SiegeBaseState extends PersistentState {
 			session.getLastObservation(),
 			session.getLastObservationTick(),
 			session.getLastPlanTick(),
-			session.getFallbackReason()
+			session.getFallbackReason(),
+			session.getOwnerPlayerUuid(),
+			session.getOwnerPlayerName(),
+			session.getBattleStats()
 		));
 	}
 
@@ -937,6 +1014,14 @@ public class SiegeBaseState extends PersistentState {
 		return List.copyOf(placedDefenders);
 	}
 
+	public boolean hasCompletedSiege(String siegeId) {
+		return siegeId != null && completedSiegeIds.contains(siegeId);
+	}
+
+	public Set<String> getCompletedSiegeIds() {
+		return Set.copyOf(completedSiegeIds);
+	}
+
 	public boolean hasDefenderAt(String placementDimensionId, BlockPos pos) {
 		for (PlacedDefender defender : placedDefenders) {
 			if (defender.dimensionId().equals(placementDimensionId) && defender.homePost().equals(pos)) {
@@ -977,5 +1062,103 @@ public class SiegeBaseState extends PersistentState {
 			}
 		}
 		return false;
+	}
+
+	public int completedRegularSiegesForAge(int ageLevel) {
+		int completed = 0;
+		for (SiegeCatalog.SiegeDefinition definition : SiegeCatalog.all()) {
+			if (definition.ageLevel() == ageLevel && !definition.ageDefining() && completedSiegeIds.contains(definition.id())) {
+				completed++;
+			}
+		}
+		return completed;
+	}
+
+	public boolean hasCompletedAllRegularSiegesForAge(int ageLevel) {
+		int total = 0;
+		for (SiegeCatalog.SiegeDefinition definition : SiegeCatalog.all()) {
+			if (definition.ageLevel() == ageLevel && !definition.ageDefining()) {
+				total++;
+				if (!completedSiegeIds.contains(definition.id())) {
+					return false;
+				}
+			}
+		}
+		return total > 0;
+	}
+
+	public long nextReportId() {
+		long id = nextReportId;
+		nextReportId = Math.max(1L, nextReportId + 1L);
+		markDirty();
+		return id;
+	}
+
+	public SiegeResultReport getPendingReport() {
+		return pendingReport;
+	}
+
+	public void setPendingReport(SiegeResultReport pendingReport) {
+		this.pendingReport = pendingReport;
+		markDirty();
+	}
+
+	public void clearPendingReport() {
+		if (this.pendingReport == null) {
+			return;
+		}
+		this.pendingReport = null;
+		markDirty();
+	}
+
+	public void updateBattleStats(UnaryOperator<SiegeBattleStats> updater) {
+		updateSession(session -> new SiegeSession(
+			session.getPhase(),
+			session.getSessionAgeLevel(),
+			session.getSessionVictoryCount(),
+			session.getObjectivePos(),
+			session.getRallyPos(),
+			session.getSpawnCenter(),
+			session.getStartedGameTime(),
+			session.getPhaseStartedGameTime(),
+			session.getCountdownEndGameTime(),
+			session.getAttackerIds(),
+			session.getEngineIds(),
+			session.getRoleAssignments(),
+			session.getCurrentPlan(),
+			session.getLastObservation(),
+			session.getLastObservationTick(),
+			session.getLastPlanTick(),
+			session.getFallbackReason(),
+			session.getOwnerPlayerUuid(),
+			session.getOwnerPlayerName(),
+			updater.apply(session.getBattleStats())
+		));
+	}
+
+	private void recomputeCurrentAgeRegularWins() {
+		this.currentAgeRegularWins = Math.min(REGULAR_WINS_PER_AGE, completedRegularSiegesForAge(this.ageLevel));
+	}
+
+	private void migrateCompletedSiegeIdsFromLegacyProgress() {
+		for (SiegeCatalog.SiegeDefinition definition : SiegeCatalog.all()) {
+			if (definition.ageLevel() < this.ageLevel) {
+				completedSiegeIds.add(definition.id());
+			}
+		}
+		if (this.ageLevel >= 0 && this.currentAgeRegularWins > 0) {
+			int remaining = this.currentAgeRegularWins;
+			for (SiegeCatalog.SiegeDefinition definition : SiegeCatalog.all()) {
+				if (definition.ageLevel() != this.ageLevel || definition.ageDefining()) {
+					continue;
+				}
+				if (remaining <= 0) {
+					break;
+				}
+				completedSiegeIds.add(definition.id());
+				remaining--;
+			}
+		}
+		recomputeCurrentAgeRegularWins();
 	}
 }
