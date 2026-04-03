@@ -20,6 +20,8 @@ public final class AgesOfSiegeIntegrationApi {
 	public static final String CREDIT_TREASURY_KEY = "credit_treasury";
 	public static final String SPEND_TREASURY_KEY = "spend_treasury";
 	public static final String SET_TREASURY_KEY = "set_treasury";
+	public static final String SET_BANK_POSITION_KEY = "set_bank_position";
+	public static final String CLEAR_BANK_POSITION_KEY = "clear_bank_position";
 
 	private AgesOfSiegeIntegrationApi() {
 	}
@@ -32,6 +34,8 @@ public final class AgesOfSiegeIntegrationApi {
 		api.put(CREDIT_TREASURY_KEY, (BiConsumer<MinecraftServer, Long>) AgesOfSiegeIntegrationApi::creditTreasury);
 		api.put(SPEND_TREASURY_KEY, (BiFunction<MinecraftServer, Long, Boolean>) AgesOfSiegeIntegrationApi::spendTreasury);
 		api.put(SET_TREASURY_KEY, (BiConsumer<MinecraftServer, Long>) AgesOfSiegeIntegrationApi::setTreasuryBalance);
+		api.put(SET_BANK_POSITION_KEY, (BiConsumer<MinecraftServer, NbtCompound>) AgesOfSiegeIntegrationApi::setBankPosition);
+		api.put(CLEAR_BANK_POSITION_KEY, (BiConsumer<MinecraftServer, NbtCompound>) AgesOfSiegeIntegrationApi::clearBankPosition);
 		FabricLoader.getInstance().getObjectShare().put(API_KEY, api);
 	}
 
@@ -77,5 +81,26 @@ public final class AgesOfSiegeIntegrationApi {
 			return;
 		}
 		SharedTreasuryState.get(server).setBalance(amount);
+	}
+
+	private static void setBankPosition(MinecraftServer server, NbtCompound request) {
+		if (request == null) {
+			return;
+		}
+		SiegeBaseState.get(server).setTrackedBank(
+			new net.minecraft.util.math.BlockPos(request.getInt("x"), request.getInt("y"), request.getInt("z")),
+			request.getString("dimension"),
+			request.contains("protectionCap") ? request.getInt("protectionCap") : 100
+		);
+	}
+
+	private static void clearBankPosition(MinecraftServer server, NbtCompound request) {
+		if (request == null) {
+			return;
+		}
+		SiegeBaseState.get(server).clearTrackedBankIfMatches(
+			new net.minecraft.util.math.BlockPos(request.getInt("x"), request.getInt("y"), request.getInt("z")),
+			request.getString("dimension")
+		);
 	}
 }

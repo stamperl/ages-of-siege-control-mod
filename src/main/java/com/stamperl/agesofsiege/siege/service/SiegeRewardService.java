@@ -1,9 +1,9 @@
 package com.stamperl.agesofsiege.siege.service;
 
 import com.stamperl.agesofsiege.defense.DefenderTokenData;
-import com.stamperl.agesofsiege.item.ModItems;
 import com.stamperl.agesofsiege.siege.SiegeCatalog;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.random.Random;
@@ -24,6 +24,13 @@ public final class SiegeRewardService {
 		{"magistuarmory:bronze_buckler", "magistuarmory:iron_shortsword", "minecraft:bow"},
 		{"magistuarmory:iron_buckler", "magistuarmory:steel_shortsword", "minecraft:crossbow"}
 	};
+	private static final List<CoinDefinition> COINS = List.of(
+		new CoinDefinition("the_age_of_traders:copper_coin", 1, Items.GOLD_NUGGET),
+		new CoinDefinition("the_age_of_traders:iron_coin", 2, Items.IRON_NUGGET),
+		new CoinDefinition("the_age_of_traders:gold_coin", 5, Items.GOLD_NUGGET),
+		new CoinDefinition("the_age_of_traders:diamond_coin", 10, Items.DIAMOND),
+		new CoinDefinition("the_age_of_traders:netherite_coin", 25, Items.NETHERITE_SCRAP)
+	);
 
 	public List<ItemStack> buildVictoryRewards(int ageLevel, String siegeId, RewardContext context) {
 		RewardContext effectiveContext = context == null ? RewardContext.firstClear() : context;
@@ -85,13 +92,12 @@ public final class SiegeRewardService {
 	private List<RewardStack> rollRewardStacks(int ageLevel, String siegeId, boolean rerun, Random random) {
 		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.byId(siegeId);
 		int tier = Math.max(0, Math.min(ageLevel, 3));
-		int warSupplies = definition == null ? 3 + ageLevel : definition.warSuppliesReward();
-		if (rerun) {
-			warSupplies = Math.max(1, (int) Math.ceil(warSupplies * 0.5D));
-		}
+		int rewardWeight = definition == null ? 3 + ageLevel : definition.warSuppliesReward();
 
 		List<RewardStack> rewards = new ArrayList<>();
-		rewards.add(new RewardStack(new ItemStack(ModItems.WAR_SUPPLIES, warSupplies), false));
+		for (ItemStack coin : rollCoins(tier, rewardWeight, rerun, random)) {
+			rewards.add(new RewardStack(coin, false));
+		}
 		for (ItemStack food : rollFood(tier, rerun, random)) {
 			rewards.add(new RewardStack(food, false));
 		}
@@ -110,6 +116,18 @@ public final class SiegeRewardService {
 			}
 		}
 		return List.copyOf(rewards);
+	}
+
+	public static ItemStack previewCoinStack(int ageLevel) {
+		int tier = Math.max(0, Math.min(ageLevel, 3));
+		int maxCoinIndex = maxCoinIndex(tier);
+		for (int i = maxCoinIndex; i >= 0; i--) {
+			ItemStack stack = COINS.get(i).createStack(1);
+			if (!stack.isEmpty()) {
+				return stack;
+			}
+		}
+		return new ItemStack(Items.GOLD_NUGGET);
 	}
 
 	private List<ItemStack> rollFood(int tier, boolean rerun, Random random) {
@@ -147,6 +165,50 @@ public final class SiegeRewardService {
 		return List.copyOf(materials);
 	}
 
+	private List<ItemStack> rollCoins(int tier, int rewardWeight, boolean rerun, Random random) {
+		int totalValue = rollCoinValue(tier, rewardWeight, rerun, random);
+		int maxCoinIndex = maxCoinIndex(tier);
+		List<ItemStack> coins = new ArrayList<>();
+		for (int i = maxCoinIndex; i >= 0 && totalValue > 0; i--) {
+			CoinDefinition definition = COINS.get(i);
+			int count = totalValue / definition.value();
+			if (count <= 0) {
+				continue;
+			}
+			totalValue -= count * definition.value();
+			coins.add(definition.createStack(count));
+		}
+		if (coins.isEmpty()) {
+			coins.add(COINS.get(0).createStack(1));
+		}
+		return List.copyOf(coins);
+	}
+
+	private int rollCoinValue(int tier, int rewardWeight, boolean rerun, Random random) {
+		int multiplier = switch (tier) {
+			case 0 -> 3;
+			case 1 -> 5;
+			case 2 -> 8;
+			default -> 12;
+		};
+		int baseValue = Math.max(1, rewardWeight) * multiplier;
+		int bonus = random.nextInt(multiplier + Math.max(1, tier));
+		int total = baseValue + bonus;
+		if (rerun) {
+			total = Math.max(1, (int) Math.ceil(total * 0.55D));
+		}
+		return total;
+	}
+
+	private static int maxCoinIndex(int tier) {
+		return switch (tier) {
+			case 0 -> 1;
+			case 1 -> 2;
+			case 2 -> 3;
+			default -> 4;
+		};
+	}
+
 	private ItemStack rollGear(int tier, boolean rerun, Random random) {
 		String[][] pool = rerun ? RERUN_GEAR_POOLS : FIRST_CLEAR_GEAR_POOLS;
 		String[] tierPool = pool[Math.max(0, Math.min(tier, pool.length - 1))];
@@ -174,6 +236,16 @@ public final class SiegeRewardService {
 	}
 
 	private record RewardStack(ItemStack stack, boolean ageGear) {
+	}
+
+	private record CoinDefinition(String itemId, int value, Item fallbackItem) {
+		private ItemStack createStack(int count) {
+			ItemStack stack = DefenderTokenData.optionalRegisteredStack(itemId, count);
+			if (!stack.isEmpty()) {
+				return stack;
+			}
+			return new ItemStack(fallbackItem, Math.max(1, count));
+		}
 	}
 
 	public record RewardPreviewEntry(

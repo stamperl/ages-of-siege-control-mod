@@ -8,7 +8,7 @@
   ],
   "key": {
     "W": {
-      "item": "ages_of_siege:war_supplies"
+      "item": "minecraft:string"
     },
     "I": {
       "item": "minecraft:iron_ingot"

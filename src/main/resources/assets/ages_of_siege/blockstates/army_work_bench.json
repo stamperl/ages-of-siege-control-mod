@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "facing=north,part=main": { "model": "ages_of_siege:block/army_work_bench_main" },
+    "facing=east,part=main": { "model": "ages_of_siege:block/army_work_bench_main", "y": 90 },
+    "facing=south,part=main": { "model": "ages_of_siege:block/army_work_bench_main", "y": 180 },
+    "facing=west,part=main": { "model": "ages_of_siege:block/army_work_bench_main", "y": 270 },
+    "facing=north,part=extension": { "model": "ages_of_siege:block/army_work_bench_extension" },
+    "facing=east,part=extension": { "model": "ages_of_siege:block/army_work_bench_extension", "y": 90 },
+    "facing=south,part=extension": { "model": "ages_of_siege:block/army_work_bench_extension", "y": 180 },
+    "facing=west,part=extension": { "model": "ages_of_siege:block/army_work_bench_extension", "y": 270 }
+  }
+}

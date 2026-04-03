@@ -29,10 +29,6 @@ public final class ModItems {
 		"army_ledger",
 		new ArmyLedgerItem(new Item.Settings().maxCount(1))
 	);
-	public static final Item WAR_SUPPLIES = register(
-		"war_supplies",
-		new Item(new Item.Settings().maxCount(64))
-	);
 	public static final Item ARCHER_TOKEN = register(
 		"archer_token",
 		new DefenderTokenItem(new Item.Settings().maxDamage(DefenderTokenData.maxDamage()), DEFENDER_SPAWNER, DefenderRole.ARCHER)
@@ -55,9 +51,6 @@ public final class ModItems {
 			entries.add(RAID_RALLY_BANNER);
 			entries.add(ARMY_LEDGER);
 			entries.add(ModBlocks.REPAIR_CHEST_ITEM);
-		});
-		ItemGroupEvents.modifyEntriesEvent(ItemGroups.INGREDIENTS).register(entries -> {
-			entries.add(WAR_SUPPLIES);
 		});
 		ItemGroupEvents.modifyEntriesEvent(ItemGroups.COMBAT).register(entries -> {
 			entries.add(ARCHER_TOKEN);

@@ -1,5 +1,6 @@
 package com.stamperl.agesofsiege.state;
 
+import com.stamperl.agesofsiege.AgesOfSiegeMod;
 import com.stamperl.agesofsiege.report.SiegeBattleStats;
 import com.stamperl.agesofsiege.report.SiegeResultReport;
 import com.stamperl.agesofsiege.siege.SiegeCatalog;
@@ -39,6 +40,8 @@ import java.util.function.UnaryOperator;
 public class SiegeBaseState extends PersistentState {
 	private static final String STATE_KEY = "ages_of_siege_base";
 	private static final int MAX_OBJECTIVE_HEALTH = 30;
+	private static final int MAX_BANK_HEALTH = 20;
+	private static final int DEFAULT_BANK_PROTECTION_CAP = 100;
 	private static final int REGULAR_WINS_PER_AGE = 5;
 	private static final String DEFAULT_SIEGE_ID = "homestead_watch";
 	private static final String[] AGE_NAMES = {"Homestead", "Fortified", "Ironkeep", "Early Industry"};
@@ -53,6 +56,10 @@ public class SiegeBaseState extends PersistentState {
 	private boolean siegeFailed;
 	private BlockPos rallyPoint;
 	private BlockPos assaultOrigin;
+	private BlockPos trackedBankPos;
+	private String trackedBankDimensionId = "minecraft:overworld";
+	private int bankProtectionCap = DEFAULT_BANK_PROTECTION_CAP;
+	private int bankHealth = MAX_BANK_HEALTH;
 	private String selectedSiegeId = DEFAULT_SIEGE_ID;
 	private int objectiveHealth = MAX_OBJECTIVE_HEALTH;
 	private final Map<Long, Integer> wallHealth = new HashMap<>();
@@ -99,6 +106,18 @@ public class SiegeBaseState extends PersistentState {
 				nbt.getInt("assaultOriginY"),
 				nbt.getInt("assaultOriginZ")
 			);
+		}
+		if (nbt.contains("bankX")) {
+			state.trackedBankPos = new BlockPos(
+				nbt.getInt("bankX"),
+				nbt.getInt("bankY"),
+				nbt.getInt("bankZ")
+			);
+			state.trackedBankDimensionId = nbt.contains("bankDimension")
+				? nbt.getString("bankDimension")
+				: state.dimensionId;
+			state.bankProtectionCap = nbt.contains("bankProtectionCap") ? nbt.getInt("bankProtectionCap") : DEFAULT_BANK_PROTECTION_CAP;
+			state.bankHealth = nbt.contains("bankHealth") ? nbt.getInt("bankHealth") : MAX_BANK_HEALTH;
 		}
 		state.selectedSiegeId = nbt.contains("selectedSiegeId") ? nbt.getString("selectedSiegeId") : DEFAULT_SIEGE_ID;
 		state.objectiveHealth = nbt.contains("objectiveHealth") ? nbt.getInt("objectiveHealth") : MAX_OBJECTIVE_HEALTH;
@@ -239,6 +258,67 @@ public class SiegeBaseState extends PersistentState {
 
 	public BlockPos getBasePos() {
 		return basePos;
+	}
+
+	public BlockPos getTrackedBankPos() {
+		return trackedBankPos;
+	}
+
+	public String getTrackedBankDimensionId() {
+		return trackedBankDimensionId;
+	}
+
+	public int getBankProtectionCap() {
+		return bankProtectionCap;
+	}
+
+	public int getBankHealth() {
+		return bankHealth;
+	}
+
+	public int getMaxBankHealth() {
+		return MAX_BANK_HEALTH;
+	}
+
+	public boolean hasTrackedBank() {
+		return trackedBankPos != null;
+	}
+
+	public boolean isTrackedBankAt(BlockPos pos, String dimensionId) {
+		return trackedBankPos != null
+			&& trackedBankPos.equals(pos)
+			&& trackedBankDimensionId.equals(dimensionId);
+	}
+
+	public void setTrackedBank(BlockPos pos, String dimensionId, int protectionCap) {
+		this.trackedBankPos = pos == null ? null : pos.toImmutable();
+		this.trackedBankDimensionId = dimensionId == null || dimensionId.isBlank() ? "minecraft:overworld" : dimensionId;
+		this.bankProtectionCap = Math.max(0, protectionCap);
+		this.bankHealth = MAX_BANK_HEALTH;
+		markDirty();
+	}
+
+	public void clearTrackedBank() {
+		if (trackedBankPos == null) {
+			return;
+		}
+		trackedBankPos = null;
+		trackedBankDimensionId = "minecraft:overworld";
+		bankProtectionCap = DEFAULT_BANK_PROTECTION_CAP;
+		bankHealth = MAX_BANK_HEALTH;
+		markDirty();
+	}
+
+	public void clearTrackedBankIfMatches(BlockPos pos, String dimensionId) {
+		if (!isTrackedBankAt(pos, dimensionId)) {
+			return;
+		}
+		clearTrackedBank();
+	}
+
+	public void setBankHealthValue(int bankHealth) {
+		this.bankHealth = MathHelper.clamp(bankHealth, 0, MAX_BANK_HEALTH);
+		markDirty();
 	}
 
 	public boolean isSiegeActive() {
@@ -641,8 +721,8 @@ public class SiegeBaseState extends PersistentState {
 			0L,
 			0L,
 			null,
-			null,
-			"",
+			ownerUuid,
+			ownerName == null ? "" : ownerName,
 			SiegeBattleStats.empty()
 		);
 		markDirty();
@@ -787,6 +867,9 @@ public class SiegeBaseState extends PersistentState {
 
 	public void endSiege(boolean failed, boolean rewardProgress) {
 		this.siegeFailed = failed;
+		if (failed && this.pendingReport == null) {
+			AgesOfSiegeMod.LOGGER.warn("endSiege(true, {}) executed without a pending report stored.", rewardProgress);
+		}
 		this.assaultOrigin = null;
 		this.activeSession = null;
 		resetCompatRuntime();
@@ -907,6 +990,14 @@ public class SiegeBaseState extends PersistentState {
 			nbt.putInt("assaultOriginX", assaultOrigin.getX());
 			nbt.putInt("assaultOriginY", assaultOrigin.getY());
 			nbt.putInt("assaultOriginZ", assaultOrigin.getZ());
+		}
+		if (trackedBankPos != null) {
+			nbt.putInt("bankX", trackedBankPos.getX());
+			nbt.putInt("bankY", trackedBankPos.getY());
+			nbt.putInt("bankZ", trackedBankPos.getZ());
+			nbt.putString("bankDimension", trackedBankDimensionId);
+			nbt.putInt("bankProtectionCap", bankProtectionCap);
+			nbt.putInt("bankHealth", bankHealth);
 		}
 		nbt.putString("selectedSiegeId", selectedSiegeId == null ? DEFAULT_SIEGE_ID : selectedSiegeId);
 		nbt.putInt("objectiveHealth", objectiveHealth);

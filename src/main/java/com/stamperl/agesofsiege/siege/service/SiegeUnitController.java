@@ -52,6 +52,10 @@ public final class SiegeUnitController {
 
 		SiegePlan plan = session.getCurrentPlan();
 		BlockPos objectivePos = session.getObjectivePos();
+		BlockPos bankPos = objectiveService.trackedBankPos(world, state);
+		if (bankPos != null && !objectiveService.isTrackedBankPresent(world, state)) {
+			bankPos = null;
+		}
 		List<LivingEntity> placedDefenders = resolvePlacedDefenders(world, state);
 		Map<UUID, UnitRole> liveAssignments = deriveLiveRoleAssignments(world, session);
 		List<Vec3d> primaryBreacherPositions = primaryBreacherPositions(world, session, liveAssignments);
@@ -70,13 +74,13 @@ public final class SiegeUnitController {
 			BreachCapability breachCapability = breachCapabilityFor(hostile, role);
 			int wallDamage = wallDamageFor(hostile, breachCapability);
 			if (fallbackBreachEnabled && role != UnitRole.ESCORT && breachCapability != BreachCapability.NONE) {
-				controlFallbackBreacher(hostile, world, state, session, plan, objectivePos, wallDamage);
+				controlFallbackBreacher(hostile, world, state, session, plan, objectivePos, bankPos, wallDamage);
 				continue;
 			}
 			switch (role) {
-				case BREACHER -> controlPrimaryBreacher(hostile, world, state, session, plan, objectivePos, wallDamage);
-				case RANGED -> controlRanged(hostile, world, state, session, plan, objectivePos, primaryBreacherPositions, placedDefenders);
-				case ESCORT -> controlEscort(hostile, world, state, session, plan, objectivePos, primaryBreacherPositions, placedDefenders);
+				case BREACHER -> controlPrimaryBreacher(hostile, world, state, session, plan, objectivePos, bankPos, wallDamage);
+				case RANGED -> controlRanged(hostile, world, state, session, plan, objectivePos, bankPos, primaryBreacherPositions, placedDefenders);
+				case ESCORT -> controlEscort(hostile, world, state, session, plan, objectivePos, bankPos, primaryBreacherPositions, placedDefenders);
 				case RAM -> {
 				}
 			}
@@ -99,7 +103,7 @@ public final class SiegeUnitController {
 		}
 	}
 
-	private void controlPrimaryBreacher(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, SiegePlan plan, BlockPos objectivePos, int wallDamage) {
+	private void controlPrimaryBreacher(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, SiegePlan plan, BlockPos objectivePos, BlockPos bankPos, int wallDamage) {
 		if (session.getPhase() == SiegePhase.FORM_UP) {
 			moveToFormation(hostile, world, session);
 			return;
@@ -111,14 +115,15 @@ public final class SiegeUnitController {
 			return;
 		}
 		hostile.setTarget(null);
+		ObjectiveTarget objectiveTarget = resolveObjectiveTarget(hostile, objectivePos, bankPos);
 
 		if (session.getPhase() == SiegePhase.RUSH) {
-			attackObjective(hostile, world, state, session, objectivePos);
+			attackObjective(hostile, world, state, session, objectiveTarget);
 			return;
 		}
 
 		if (plan == null) {
-			moveToward(hostile, world, Vec3d.ofCenter(objectivePos), 1.0D);
+			moveToward(hostile, world, Vec3d.ofCenter(objectiveTarget.pos()), 1.0D);
 			return;
 		}
 
@@ -134,21 +139,22 @@ public final class SiegeUnitController {
 			}
 		}
 
-		attackObjective(hostile, world, state, session, objectivePos);
+		attackObjective(hostile, world, state, session, objectiveTarget);
 	}
 
-	private void controlFallbackBreacher(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, SiegePlan plan, BlockPos objectivePos, int wallDamage) {
+	private void controlFallbackBreacher(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, SiegePlan plan, BlockPos objectivePos, BlockPos bankPos, int wallDamage) {
 		if (session.getPhase() == SiegePhase.FORM_UP) {
 			moveToFormation(hostile, world, session);
 			return;
 		}
 		hostile.setTarget(null);
+		ObjectiveTarget objectiveTarget = resolveObjectiveTarget(hostile, objectivePos, bankPos);
 		if (session.getPhase() == SiegePhase.RUSH) {
-			attackObjective(hostile, world, state, session, objectivePos);
+			attackObjective(hostile, world, state, session, objectiveTarget);
 			return;
 		}
 		if (plan == null) {
-			moveToward(hostile, world, Vec3d.ofCenter(objectivePos), 1.0D);
+			moveToward(hostile, world, Vec3d.ofCenter(objectiveTarget.pos()), 1.0D);
 			return;
 		}
 		if (plan.planType() == SiegePlanType.BREACH_REQUIRED || plan.planType() == SiegePlanType.FALLBACK_PUSH) {
@@ -162,7 +168,7 @@ public final class SiegeUnitController {
 				return;
 			}
 		}
-		attackObjective(hostile, world, state, session, objectivePos);
+		attackObjective(hostile, world, state, session, objectiveTarget);
 	}
 
 	private void controlRanged(
@@ -172,6 +178,7 @@ public final class SiegeUnitController {
 		SiegeSession session,
 		SiegePlan plan,
 		BlockPos objectivePos,
+		BlockPos bankPos,
 		List<Vec3d> breacherPositions,
 		List<LivingEntity> placedDefenders
 	) {
@@ -188,7 +195,7 @@ public final class SiegeUnitController {
 		hostile.setTarget(null);
 
 		if (session.getPhase() == SiegePhase.RUSH) {
-			attackObjective(hostile, world, stateFor(world), session, objectivePos);
+			attackObjective(hostile, world, stateFor(world), session, resolveObjectiveTarget(hostile, objectivePos, bankPos));
 			return;
 		}
 
@@ -210,6 +217,7 @@ public final class SiegeUnitController {
 		SiegeSession session,
 		SiegePlan plan,
 		BlockPos objectivePos,
+		BlockPos bankPos,
 		List<Vec3d> breacherPositions,
 		List<LivingEntity> placedDefenders
 	) {
@@ -236,7 +244,7 @@ public final class SiegeUnitController {
 		}
 
 		if (session.getPhase() == SiegePhase.RUSH) {
-			attackObjective(hostile, world, stateFor(world), session, objectivePos);
+			attackObjective(hostile, world, stateFor(world), session, resolveObjectiveTarget(hostile, objectivePos, bankPos));
 			return;
 		}
 
@@ -261,8 +269,8 @@ public final class SiegeUnitController {
 		moveToward(hostile, world, Vec3d.ofCenter(objectivePos), 1.0D);
 	}
 
-	private void attackObjective(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, BlockPos objectivePos) {
-		Vec3d objective = Vec3d.ofCenter(objectivePos);
+	private void attackObjective(HostileEntity hostile, ServerWorld world, SiegeBaseState state, SiegeSession session, ObjectiveTarget objectiveTarget) {
+		Vec3d objective = Vec3d.ofCenter(objectiveTarget.pos());
 		if (hostile.squaredDistanceTo(objective) > OBJECTIVE_ATTACK_RANGE * OBJECTIVE_ATTACK_RANGE) {
 			moveToward(hostile, world, objective, 1.0D);
 			return;
@@ -270,8 +278,20 @@ public final class SiegeUnitController {
 		hostile.getNavigation().stop();
 		hostile.swingHand(Hand.MAIN_HAND);
 		if (world.getTime() % 10L == 0L) {
-			objectiveService.damageObjective(world, state, session, 1);
+			if (objectiveTarget.bank()) {
+				objectiveService.damageBank(world, state, session, 1);
+			} else {
+				objectiveService.damageObjective(world, state, session, 1);
+			}
 		}
+	}
+
+	private ObjectiveTarget resolveObjectiveTarget(HostileEntity hostile, BlockPos bannerPos, BlockPos bankPos) {
+		if (bankPos == null) {
+			return new ObjectiveTarget(bannerPos, false);
+		}
+		boolean targetBank = Math.floorMod(hostile.getUuid().hashCode(), 2) == 0;
+		return new ObjectiveTarget(targetBank ? bankPos : bannerPos, targetBank);
 	}
 
 	private void attackWall(HostileEntity hostile, ServerWorld world, SiegeBaseState state, BlockPos targetBlock, int wallDamage) {
@@ -619,5 +639,8 @@ public final class SiegeUnitController {
 				session.getPhase()
 			);
 		}
+	}
+
+	private record ObjectiveTarget(BlockPos pos, boolean bank) {
 	}
 }

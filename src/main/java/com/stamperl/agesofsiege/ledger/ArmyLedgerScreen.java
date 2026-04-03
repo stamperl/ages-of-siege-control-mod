@@ -6,6 +6,7 @@ import com.stamperl.agesofsiege.defense.DefenderRole;
 import com.stamperl.agesofsiege.item.ModItems;
 import com.stamperl.agesofsiege.siege.SiegeCatalog;
 import com.stamperl.agesofsiege.siege.runtime.UnitRole;
+import com.stamperl.agesofsiege.siege.service.SiegeRewardService;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.block.BlockState;
@@ -1793,7 +1794,7 @@ public class ArmyLedgerScreen extends Screen {
 			case "smokehouse_pressure" -> new ItemStack(Items.CAMPFIRE);
 			case "foundry_break" -> new ItemStack(Items.REDSTONE);
 			case "industry_age_siege" -> new ItemStack(Items.BLAST_FURNACE);
-			default -> siege.ageDefining() ? new ItemStack(ModItems.SETTLEMENT_STANDARD) : new ItemStack(ModItems.WAR_SUPPLIES);
+			default -> siege.ageDefining() ? new ItemStack(ModItems.SETTLEMENT_STANDARD) : SiegeRewardService.previewCoinStack(siege.ageLevel());
 		};
 	}
 

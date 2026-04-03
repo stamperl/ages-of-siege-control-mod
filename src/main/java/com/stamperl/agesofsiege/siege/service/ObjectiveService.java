@@ -1,16 +1,22 @@
 package com.stamperl.agesofsiege.siege.service;
 
+import com.stamperl.agesofsiege.siege.SiegeDirector;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BlockEntity;
 import com.stamperl.agesofsiege.siege.runtime.SiegeSession;
+import com.stamperl.agesofsiege.state.SharedTreasuryState;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
+import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.MathHelper;
 
 public final class ObjectiveService {
+	private static final Identifier BANK_BLOCK_ID = new Identifier("the_age_of_traders", "bank");
 	private final SiegeSpawner spawner = new SiegeSpawner();
 
 	public boolean isObjectivePresent(ServerWorld world, SiegeSession session, BlockPos objectivePos) {
@@ -51,11 +57,8 @@ public final class ObjectiveService {
 		}
 
 		if (state.getActiveSession() != null) {
-			spawner.despawnAttackers(world, state.getAttackerIds());
-			spawner.despawnRams(world, state.getRamIds());
-			state.endSiege(true, false);
 			redeploySettlementStandard(world, pos, destroyedBannerState);
-			world.getServer().getPlayerManager().broadcast(Text.literal("The Settlement Standard was destroyed. The siege is lost."), false);
+			SiegeDirector.handleCombatDefeat(world, state, session, "The Settlement Standard was destroyed. The siege is lost.");
 			return;
 		}
 
@@ -64,6 +67,71 @@ public final class ObjectiveService {
 			Text.literal("The Settlement Standard was destroyed. This base is no longer claimed, but placed defenders remain bound to their owner and posts."),
 			false
 		);
+	}
+
+	public boolean isTrackedBankPresent(ServerWorld world, SiegeBaseState state) {
+		BlockPos bankPos = trackedBankPos(world, state);
+		return bankPos != null && isBankBlock(world.getBlockState(bankPos));
+	}
+
+	public BlockPos trackedBankPos(ServerWorld world, SiegeBaseState state) {
+		if (!state.hasTrackedBank()) {
+			return null;
+		}
+		String worldDimensionId = world.getRegistryKey().getValue().toString();
+		if (!worldDimensionId.equals(state.getTrackedBankDimensionId())) {
+			return null;
+		}
+		return state.getTrackedBankPos();
+	}
+
+	public void damageBank(ServerWorld world, SiegeBaseState state, SiegeSession session, int amount) {
+		BlockPos bankPos = trackedBankPos(world, state);
+		if (bankPos == null || !isBankBlock(world.getBlockState(bankPos))) {
+			return;
+		}
+		state.setBankHealthValue(Math.max(0, state.getBankHealth() - amount));
+		if (state.getBankHealth() == 0) {
+			handleBankDestroyed(world, state, session, bankPos, true);
+			world.breakBlock(bankPos, false);
+			return;
+		}
+
+		if (state.isSiegeActive()) {
+			world.getServer().getPlayerManager().broadcast(
+				Text.literal("Guild bank damaged: " + state.getBankHealth() + "/" + state.getMaxBankHealth() + " HP"),
+				false
+			);
+		}
+		state.markDirty();
+	}
+
+	public void handleBankDestroyed(ServerWorld world, SiegeBaseState state, SiegeSession session, BlockPos pos, boolean siegeAttack) {
+		if (!state.isTrackedBankAt(pos, world.getRegistryKey().getValue().toString())) {
+			return;
+		}
+		int protectionCap = state.getBankProtectionCap();
+		state.clearTrackedBank();
+		if (!siegeAttack || session == null) {
+			return;
+		}
+		int lossPercent = MathHelper.nextInt(world.random, 10, 50);
+		long lostCoins = SharedTreasuryState.get(world.getServer()).applyProtectedLoss(protectionCap, lossPercent);
+		if (lostCoins > 0) {
+			world.getServer().getPlayerManager().broadcast(
+				Text.literal("The guild bank was destroyed. " + lostCoins + " treasury coins were lost in the chaos."),
+				false
+			);
+			return;
+		}
+		world.getServer().getPlayerManager().broadcast(
+			Text.literal("The guild bank was destroyed, but the protected reserve held firm."),
+			false
+		);
+	}
+
+	private boolean isBankBlock(BlockState state) {
+		return Registries.BLOCK.getId(state.getBlock()).equals(BANK_BLOCK_ID);
 	}
 
 	private void redeploySettlementStandard(ServerWorld world, BlockPos pos, BlockState destroyedBannerState) {

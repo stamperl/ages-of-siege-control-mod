@@ -1,5 +1,6 @@
 package com.stamperl.agesofsiege.siege;
 
+import com.stamperl.agesofsiege.AgesOfSiegeMod;
 import com.stamperl.agesofsiege.report.SiegeWarReportService;
 import com.stamperl.agesofsiege.siege.runtime.BattlefieldObservation;
 import com.stamperl.agesofsiege.siege.runtime.SiegePhase;
@@ -337,11 +338,35 @@ public final class SiegeDirector {
 	}
 
 	private static void transitionToDefeat(ServerWorld world, SiegeBaseState state, SiegeSession session, String message) {
+		handleCombatDefeat(world, state, session, message);
+	}
+
+	public static void handleCombatDefeat(ServerWorld world, SiegeBaseState state, SiegeSession session, String message) {
+		if (session == null) {
+			AgesOfSiegeMod.LOGGER.warn("Combat defeat requested without an active siege session. Falling back to teardown only.");
+			state.endSiege(true, false);
+			world.getServer().getPlayerManager().broadcast(Text.literal(message), false);
+			return;
+		}
+		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.resolveForState(state, state.getSelectedSiegeId());
+		AgesOfSiegeMod.LOGGER.info(
+			"Entering defeat finalization for siege '{}' owned by '{}' (uuid={}).",
+			definition == null ? state.getSelectedSiegeId() : definition.id(),
+			session.getOwnerPlayerName(),
+			session.getOwnerPlayerUuid()
+		);
+		SiegeWarReportService.finalizeDefeat(world.getServer(), state, session, definition, message);
+		if (state.getPendingReport() != null) {
+			AgesOfSiegeMod.LOGGER.info(
+				"Pending defeat report {} stored before siege teardown.",
+				state.getPendingReport().reportId()
+			);
+		} else {
+			AgesOfSiegeMod.LOGGER.error("Defeat finalization completed without storing a pending report.");
+		}
 		SPAWNER.despawnAttackers(world, state.getAttackerIds());
 		SPAWNER.despawnRams(world, state.getRamIds());
-		SiegeCatalog.SiegeDefinition definition = SiegeCatalog.resolveForState(state, state.getSelectedSiegeId());
 		state.endSiege(true, false);
-		SiegeWarReportService.finalizeDefeat(world.getServer(), state, session, definition, message);
 		world.getServer().getPlayerManager().broadcast(Text.literal(message), false);
 	}
 

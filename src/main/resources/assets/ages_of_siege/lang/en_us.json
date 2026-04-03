@@ -4,9 +4,10 @@
   "item.ages_of_siege.settlement_standard": "Settlement Standard",
   "item.ages_of_siege.raid_rally_banner": "Raid Rally Banner",
   "item.ages_of_siege.army_ledger": "Army Ledger",
+  "block.ages_of_siege.army_work_bench": "Army Work Bench",
+  "item.ages_of_siege.army_work_bench": "Army Work Bench",
   "block.ages_of_siege.repair_chest": "Repair Chest",
   "item.ages_of_siege.repair_chest": "Repair Chest",
-  "item.ages_of_siege.war_supplies": "War Supplies",
   "item.ages_of_siege.archer_token": "Archer Token",
   "item.ages_of_siege.soldier_token": "Soldier Token",
   "item.ages_of_siege.defender_recall_tool": "Defender Recall Tool"

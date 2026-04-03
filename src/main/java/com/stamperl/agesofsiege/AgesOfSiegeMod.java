@@ -12,6 +12,7 @@ import com.stamperl.agesofsiege.siege.BattleFormationCatalog;
 import com.stamperl.agesofsiege.siege.BattleUnitCatalog;
 import com.stamperl.agesofsiege.siege.SiegeDirector;
 import com.stamperl.agesofsiege.siege.SiegeCatalog;
+import com.stamperl.agesofsiege.workbench.ArmyWorkBenchService;
 import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,7 @@ public class AgesOfSiegeMod implements ModInitializer {
 		SiegeCatalog.initialize();
 		AgesOfSiegeIntegrationApi.register();
 		ArmyLedgerService.registerServer();
+		ArmyWorkBenchService.registerServer();
 		SiegeWarReportService.registerServer();
 		ModCommands.register();
 		DefenderRuntimeService.register();

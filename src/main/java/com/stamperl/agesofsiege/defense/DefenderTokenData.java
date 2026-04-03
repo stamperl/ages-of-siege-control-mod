@@ -28,6 +28,8 @@ public final class DefenderTokenData {
 	private static final String STATUS_KEY = "status";
 	private static final String APPEARANCE_KEY = "appearance";
 	private static final String HERO_DATA_KEY = "heroData";
+	private static final int XP_PER_LEVEL = 25;
+	private static final int POINTS_PER_LEVEL = 2;
 	private static final int TOKEN_MAX_DAMAGE = 240;
 	private static final int FALLEN_DAMAGE = 192;
 	private static final String[] SOLDIER_GIVEN = {"Ald", "Bram", "Cedric", "Edwin", "Garrick", "Hugh", "Ivor", "Leof", "Martin", "Osric", "Perrin", "Rowan", "Tobin", "Wulfric", "Aric", "Baldric", "Clement", "Darian", "Eamon", "Fendrel", "Godric", "Harwin", "Jerron", "Loric", "Merek", "Owyn", "Roder", "Steffan", "Ulric"};
@@ -52,6 +54,7 @@ public final class DefenderTokenData {
 		ensureStats(data);
 		ensureStatus(data, false);
 		ensureLoadout(data, role, ageLevel);
+		recalculateDerivedStats(data, role, ageLevel);
 		increment(data.getCompound(PROGRESSION_KEY), "deployments", 1);
 		data.getCompound(STATUS_KEY).putBoolean("fallen", false);
 		data.getCompound(STATUS_KEY).putBoolean("active", true);
@@ -73,6 +76,7 @@ public final class DefenderTokenData {
 		root.put(APPEARANCE_KEY, new NbtCompound());
 		root.put(HERO_DATA_KEY, new NbtCompound());
 		root.put(LOADOUT_KEY, createStarterLoadout(role, ageLevel));
+		recalculateDerivedStats(root, role, ageLevel);
 		return root;
 	}
 
@@ -128,7 +132,7 @@ public final class DefenderTokenData {
 	}
 
 	public static void applyToEntity(LivingEntity entity, NbtCompound tokenData, DefenderRole fallbackRole) {
-		NbtCompound data = tokenData == null ? createFreshData(fallbackRole, 0, Random.create()) : tokenData;
+		NbtCompound data = tokenData == null ? createFreshData(fallbackRole, 0, Random.create()) : ensureWorkbenchData(tokenData, fallbackRole);
 		DefenderRole role = resolveRole(data, fallbackRole);
 		entity.setCustomName(Text.literal(displayName(data, role)));
 		entity.setCustomNameVisible(false);
@@ -148,6 +152,19 @@ public final class DefenderTokenData {
 			double bonus = stats.contains("bonusAttack") ? stats.getDouble("bonusAttack") : 0.0D;
 			attackDamage.setBaseValue(roleBase + bonus);
 		}
+		EntityAttributeInstance armor = entity.getAttributeInstance(EntityAttributes.GENERIC_ARMOR);
+		if (armor != null) {
+			double bonus = stats.contains("bonusArmor") ? stats.getDouble("bonusArmor") : 0.0D;
+			armor.setBaseValue(bonus);
+		}
+		EntityAttributeInstance movementSpeed = entity.getAttributeInstance(EntityAttributes.GENERIC_MOVEMENT_SPEED);
+		if (movementSpeed != null) {
+			double base = entity.getType().create(entity.getWorld()) instanceof LivingEntity created
+				? created.getAttributeValue(EntityAttributes.GENERIC_MOVEMENT_SPEED)
+				: movementSpeed.getBaseValue();
+			double bonus = stats.contains("bonusSpeed") ? stats.getDouble("bonusSpeed") : 0.0D;
+			movementSpeed.setBaseValue(base + bonus);
+		}
 	}
 
 	public static NbtCompound withRoleAndStarterLoadout(NbtCompound tokenData, DefenderRole role, int ageLevel) {
@@ -155,6 +172,7 @@ public final class DefenderTokenData {
 		ensureIdentity(data, role, ageLevel, Random.create(), List.of());
 		data.getCompound(IDENTITY_KEY).putString("role", role.id());
 		data.put(LOADOUT_KEY, createStarterLoadout(role, ageLevel));
+		recalculateDerivedStats(data, role, ageLevel);
 		return data;
 	}
 
@@ -165,19 +183,115 @@ public final class DefenderTokenData {
 	}
 
 	public static NbtCompound addKill(NbtCompound tokenData, DefenderRole role) {
-		NbtCompound data = tokenData == null ? createFreshData(role, 0, Random.create()) : tokenData.copy();
+		NbtCompound data = tokenData == null ? createFreshData(role, 0, Random.create()) : ensureWorkbenchData(tokenData, role);
 		NbtCompound progression = data.getCompound(PROGRESSION_KEY);
 		increment(progression, "kills", 1);
 		addXp(progression, 5);
+		recalculateDerivedStats(data, role, 0);
 		return data;
 	}
 
 	public static NbtCompound addVictory(NbtCompound tokenData, DefenderRole role) {
-		NbtCompound data = tokenData == null ? createFreshData(role, 0, Random.create()) : tokenData.copy();
+		NbtCompound data = tokenData == null ? createFreshData(role, 0, Random.create()) : ensureWorkbenchData(tokenData, role);
 		NbtCompound progression = data.getCompound(PROGRESSION_KEY);
 		increment(progression, "wins", 1);
 		addXp(progression, 10);
+		recalculateDerivedStats(data, role, 0);
 		return data;
+	}
+
+	public static NbtCompound ensureWorkbenchData(ItemStack stack, DefenderRole role) {
+		NbtCompound data = getData(stack);
+		NbtCompound ensured = ensureWorkbenchData(data, role);
+		writeToStack(stack, ensured);
+		return ensured.copy();
+	}
+
+	public static NbtCompound ensureWorkbenchData(NbtCompound tokenData, DefenderRole fallbackRole) {
+		NbtCompound data = tokenData == null ? createFreshData(fallbackRole, 0, Random.create()) : tokenData.copy();
+		DefenderRole role = resolveRole(data, fallbackRole);
+		ensureIdentity(data, role, 0, Random.create(), List.of());
+		ensureProgression(data);
+		ensureStats(data);
+		ensureStatus(data, false);
+		ensureLoadout(data, role, 0);
+		recalculateDerivedStats(data, role, 0);
+		return data;
+	}
+
+	public static boolean canUseWorkbench(ItemStack stack) {
+		return stack != null
+			&& !stack.isEmpty()
+			&& stack.isOf(ModItems.SOLDIER_TOKEN)
+			&& !requiresRepair(stack);
+	}
+
+	public static int level(NbtCompound tokenData, DefenderRole fallbackRole) {
+		return ensureWorkbenchData(tokenData, fallbackRole).getCompound(PROGRESSION_KEY).getInt("level");
+	}
+
+	public static int xp(NbtCompound tokenData, DefenderRole fallbackRole) {
+		return ensureWorkbenchData(tokenData, fallbackRole).getCompound(PROGRESSION_KEY).getInt("xp");
+	}
+
+	public static int xpToNextLevel(NbtCompound tokenData, DefenderRole fallbackRole) {
+		return ensureWorkbenchData(tokenData, fallbackRole).getCompound(PROGRESSION_KEY).getInt("xpToNextLevel");
+	}
+
+	public static int availablePoints(NbtCompound tokenData, DefenderRole fallbackRole) {
+		return ensureWorkbenchData(tokenData, fallbackRole).getCompound(PROGRESSION_KEY).getInt("availablePoints");
+	}
+
+	public static int statValue(NbtCompound tokenData, DefenderRole fallbackRole, WorkbenchStat stat) {
+		if (stat == null) {
+			return 0;
+		}
+		return ensureWorkbenchData(tokenData, fallbackRole).getCompound(STATS_KEY).getInt(stat.id());
+	}
+
+	public static WorkbenchArmorTier equippedArmorTier(NbtCompound tokenData, DefenderRole fallbackRole) {
+		NbtCompound data = ensureWorkbenchData(tokenData, fallbackRole);
+		return WorkbenchArmorTier.from(data.getCompound(LOADOUT_KEY).getString("armorTier"));
+	}
+
+	public static boolean isArmorTierUnlocked(NbtCompound tokenData, DefenderRole fallbackRole, WorkbenchArmorTier tier) {
+		return tier != null && tier.isUnlockedAt(level(tokenData, fallbackRole));
+	}
+
+	public static NbtCompound spendPoint(NbtCompound tokenData, DefenderRole fallbackRole, WorkbenchStat stat) {
+		if (stat == null) {
+			return ensureWorkbenchData(tokenData, fallbackRole);
+		}
+		NbtCompound data = ensureWorkbenchData(tokenData, fallbackRole);
+		NbtCompound progression = data.getCompound(PROGRESSION_KEY);
+		int availablePoints = progression.getInt("availablePoints");
+		if (availablePoints <= 0) {
+			return data;
+		}
+		NbtCompound stats = data.getCompound(STATS_KEY);
+		stats.putInt(stat.id(), stats.getInt(stat.id()) + 1);
+		progression.putInt("availablePoints", availablePoints - 1);
+		recalculateDerivedStats(data, resolveRole(data, fallbackRole), 0);
+		return data;
+	}
+
+	public static NbtCompound equipArmorTier(NbtCompound tokenData, DefenderRole fallbackRole, WorkbenchArmorTier tier) {
+		if (tier == null) {
+			return ensureWorkbenchData(tokenData, fallbackRole);
+		}
+		NbtCompound data = ensureWorkbenchData(tokenData, fallbackRole);
+		if (!isArmorTierUnlocked(data, fallbackRole, tier)) {
+			return data;
+		}
+		NbtCompound loadout = data.getCompound(LOADOUT_KEY);
+		loadout.putString("armorTier", tier.id());
+		applyArmorTier(loadout, resolveRole(data, fallbackRole), tier);
+		recalculateDerivedStats(data, resolveRole(data, fallbackRole), 0);
+		return data;
+	}
+
+	public static String armorLabel(NbtCompound tokenData, DefenderRole fallbackRole) {
+		return equippedArmorTier(tokenData, fallbackRole).displayName();
 	}
 
 	public static DefenderRole resolveRole(NbtCompound tokenData, DefenderRole fallbackRole) {
@@ -259,6 +373,12 @@ public final class DefenderTokenData {
 		if (!progression.contains("xp")) {
 			progression.putInt("xp", 0);
 		}
+		if (!progression.contains("xpToNextLevel")) {
+			progression.putInt("xpToNextLevel", XP_PER_LEVEL);
+		}
+		if (!progression.contains("availablePoints")) {
+			progression.putInt("availablePoints", 0);
+		}
 		if (!progression.contains("kills")) {
 			progression.putInt("kills", 0);
 		}
@@ -268,6 +388,7 @@ public final class DefenderTokenData {
 		if (!progression.contains("deployments")) {
 			progression.putInt("deployments", 0);
 		}
+		syncProgressionFields(progression);
 		root.put(PROGRESSION_KEY, progression);
 	}
 
@@ -280,6 +401,24 @@ public final class DefenderTokenData {
 		}
 		if (!stats.contains("bonusAttack")) {
 			stats.putDouble("bonusAttack", 0.0D);
+		}
+		if (!stats.contains("bonusArmor")) {
+			stats.putDouble("bonusArmor", 0.0D);
+		}
+		if (!stats.contains("bonusSpeed")) {
+			stats.putDouble("bonusSpeed", 0.0D);
+		}
+		if (!stats.contains("vitality")) {
+			stats.putInt("vitality", 0);
+		}
+		if (!stats.contains("strength")) {
+			stats.putInt("strength", 0);
+		}
+		if (!stats.contains("discipline")) {
+			stats.putInt("discipline", 0);
+		}
+		if (!stats.contains("agility")) {
+			stats.putInt("agility", 0);
 		}
 		root.put(STATS_KEY, stats);
 		if (!root.contains(APPEARANCE_KEY, NbtElement.COMPOUND_TYPE)) {
@@ -309,6 +448,11 @@ public final class DefenderTokenData {
 	private static void ensureLoadout(NbtCompound root, DefenderRole role, int ageLevel) {
 		if (!root.contains(LOADOUT_KEY, NbtElement.COMPOUND_TYPE) || root.getCompound(LOADOUT_KEY).isEmpty()) {
 			root.put(LOADOUT_KEY, createStarterLoadout(role, ageLevel));
+			return;
+		}
+		NbtCompound loadout = root.getCompound(LOADOUT_KEY);
+		if (!loadout.contains("armorTier")) {
+			loadout.putString("armorTier", inferArmorTier(loadout).id());
 		}
 	}
 
@@ -317,19 +461,17 @@ public final class DefenderTokenData {
 		if (role == DefenderRole.ARCHER) {
 			writeStack(loadout, "mainhand", new ItemStack(Items.BOW));
 			writeStack(loadout, "offhand", new ItemStack(Items.WOODEN_SWORD));
-			writeStack(loadout, "head", new ItemStack(ageLevel >= 2 ? Items.CHAINMAIL_HELMET : Items.LEATHER_HELMET));
-			writeStack(loadout, "chest", new ItemStack(ageLevel >= 2 ? Items.CHAINMAIL_CHESTPLATE : Items.LEATHER_CHESTPLATE));
-			writeStack(loadout, "legs", new ItemStack(Items.LEATHER_LEGGINGS));
-			writeStack(loadout, "feet", new ItemStack(ageLevel >= 3 ? Items.CHAINMAIL_BOOTS : Items.LEATHER_BOOTS));
+			WorkbenchArmorTier tier = ageLevel >= 3 ? WorkbenchArmorTier.CHAINMAIL : WorkbenchArmorTier.LEATHER;
+			loadout.putString("armorTier", tier.id());
+			applyArmorTier(loadout, role, tier);
 			return loadout;
 		}
 
 		writeStack(loadout, "mainhand", new ItemStack(Items.WOODEN_SWORD));
 		writeStack(loadout, "offhand", new ItemStack(Items.SHIELD));
-		writeStack(loadout, "head", new ItemStack(ageLevel >= 2 ? Items.CHAINMAIL_HELMET : Items.LEATHER_HELMET));
-		writeStack(loadout, "chest", new ItemStack(ageLevel >= 2 ? Items.CHAINMAIL_CHESTPLATE : Items.LEATHER_CHESTPLATE));
-		writeStack(loadout, "legs", new ItemStack(Items.LEATHER_LEGGINGS));
-		writeStack(loadout, "feet", new ItemStack(ageLevel >= 2 ? Items.CHAINMAIL_BOOTS : Items.LEATHER_BOOTS));
+		WorkbenchArmorTier tier = ageLevel >= 3 ? WorkbenchArmorTier.IRON : ageLevel >= 2 ? WorkbenchArmorTier.CHAINMAIL : WorkbenchArmorTier.LEATHER;
+		loadout.putString("armorTier", tier.id());
+		applyArmorTier(loadout, role, tier);
 		return loadout;
 	}
 
@@ -373,9 +515,71 @@ public final class DefenderTokenData {
 	}
 
 	private static void addXp(NbtCompound progression, int amount) {
+		int previousLevel = Math.max(1, progression.getInt("level"));
 		int xp = progression.getInt("xp") + Math.max(0, amount);
 		progression.putInt("xp", xp);
-		progression.putInt("level", Math.max(1, 1 + (xp / 25)));
+		int nextLevel = Math.max(1, 1 + (xp / XP_PER_LEVEL));
+		progression.putInt("level", nextLevel);
+		if (nextLevel > previousLevel) {
+			int gainedLevels = nextLevel - previousLevel;
+			progression.putInt("availablePoints", progression.getInt("availablePoints") + (gainedLevels * POINTS_PER_LEVEL));
+		}
+		syncProgressionFields(progression);
+	}
+
+	private static void syncProgressionFields(NbtCompound progression) {
+		int level = Math.max(1, progression.getInt("level"));
+		progression.putInt("level", level);
+		int xp = Math.max(0, progression.getInt("xp"));
+		progression.putInt("xp", xp);
+		int nextThreshold = level * XP_PER_LEVEL;
+		progression.putInt("xpToNextLevel", Math.max(0, nextThreshold - xp));
+		progression.putInt("availablePoints", Math.max(0, progression.getInt("availablePoints")));
+	}
+
+	private static void recalculateDerivedStats(NbtCompound root, DefenderRole role, int ageLevel) {
+		NbtCompound stats = root.getCompound(STATS_KEY);
+		NbtCompound loadout = root.getCompound(LOADOUT_KEY);
+		WorkbenchArmorTier tier = WorkbenchArmorTier.from(loadout.getString("armorTier"));
+		if (role == DefenderRole.SOLDIER) {
+			applyArmorTier(loadout, role, tier);
+		}
+		stats.putDouble("bonusHealth", stats.getInt("vitality") * 2.0D);
+		stats.putDouble("bonusAttack", stats.getInt("strength") * 0.75D);
+		stats.putDouble("bonusArmor", armorValue(tier) + stats.getInt("discipline"));
+		stats.putDouble("bonusSpeed", stats.getInt("agility") * 0.01D);
+		root.put(STATS_KEY, stats);
+		root.put(LOADOUT_KEY, loadout);
+	}
+
+	private static int armorValue(WorkbenchArmorTier tier) {
+		return switch (tier) {
+			case LEATHER -> 2;
+			case CHAINMAIL -> 5;
+			case IRON -> 8;
+		};
+	}
+
+	private static void applyArmorTier(NbtCompound loadout, DefenderRole role, WorkbenchArmorTier tier) {
+		if (role == DefenderRole.ARCHER) {
+			return;
+		}
+		loadout.putString("armorTier", tier.id());
+		writeStack(loadout, "head", tier.createArmorPiece(EquipmentSlot.HEAD));
+		writeStack(loadout, "chest", tier.createArmorPiece(EquipmentSlot.CHEST));
+		writeStack(loadout, "legs", tier.createArmorPiece(EquipmentSlot.LEGS));
+		writeStack(loadout, "feet", tier.createArmorPiece(EquipmentSlot.FEET));
+	}
+
+	private static WorkbenchArmorTier inferArmorTier(NbtCompound loadout) {
+		ItemStack chest = readStack(loadout, "chest");
+		if (chest.isOf(Items.IRON_CHESTPLATE)) {
+			return WorkbenchArmorTier.IRON;
+		}
+		if (chest.isOf(Items.CHAINMAIL_CHESTPLATE)) {
+			return WorkbenchArmorTier.CHAINMAIL;
+		}
+		return WorkbenchArmorTier.LEATHER;
 	}
 
 	private static String generateName(DefenderRole role, Random random, Iterable<String> existingNames) {

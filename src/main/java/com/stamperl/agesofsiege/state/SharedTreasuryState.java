@@ -66,6 +66,21 @@ public class SharedTreasuryState extends PersistentState {
 		markDirty();
 	}
 
+	public long applyProtectedLoss(long protectionCap, int lossPercent) {
+		long protectedFloor = Math.max(0L, protectionCap);
+		if (lossPercent <= 0 || balance <= protectedFloor) {
+			return 0L;
+		}
+		long exposed = balance - protectedFloor;
+		long lost = Math.max(0L, Math.round(exposed * (lossPercent / 100.0D)));
+		if (lost <= 0L) {
+			return 0L;
+		}
+		balance = Math.max(protectedFloor, balance - lost);
+		markDirty();
+		return lost;
+	}
+
 	public NbtCompound toNbtSnapshot() {
 		NbtCompound snapshot = new NbtCompound();
 		snapshot.putLong("balance", balance);

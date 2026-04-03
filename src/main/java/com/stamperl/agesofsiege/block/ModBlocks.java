@@ -23,10 +23,21 @@ public final class ModBlocks {
 			.strength(2.5F)
 			.sounds(BlockSoundGroup.WOOD))
 	);
+	public static final Block ARMY_WORK_BENCH = registerBlock(
+		"army_work_bench",
+		new ArmyWorkBenchBlock(AbstractBlock.Settings.create()
+			.mapColor(MapColor.BROWN)
+			.strength(3.0F)
+			.sounds(BlockSoundGroup.WOOD))
+	);
 
 	public static final Item REPAIR_CHEST_ITEM = registerItem(
 		"repair_chest",
 		new BlockItem(REPAIR_CHEST, new Item.Settings())
+	);
+	public static final Item ARMY_WORK_BENCH_ITEM = registerItem(
+		"army_work_bench",
+		new BlockItem(ARMY_WORK_BENCH, new Item.Settings())
 	);
 
 	public static final BlockEntityType<RepairChestBlockEntity> REPAIR_CHEST_BLOCK_ENTITY = Registry.register(
@@ -34,12 +45,20 @@ public final class ModBlocks {
 		new Identifier(AgesOfSiegeMod.MOD_ID, "repair_chest"),
 		FabricBlockEntityTypeBuilder.create(RepairChestBlockEntity::new, REPAIR_CHEST).build()
 	);
+	public static final BlockEntityType<ArmyWorkBenchBlockEntity> ARMY_WORK_BENCH_BLOCK_ENTITY = Registry.register(
+		Registries.BLOCK_ENTITY_TYPE,
+		new Identifier(AgesOfSiegeMod.MOD_ID, "army_work_bench"),
+		FabricBlockEntityTypeBuilder.create(ArmyWorkBenchBlockEntity::new, ARMY_WORK_BENCH).build()
+	);
 
 	private ModBlocks() {
 	}
 
 	public static void register() {
-		ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).register(entries -> entries.add(REPAIR_CHEST_ITEM));
+		ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).register(entries -> {
+			entries.add(REPAIR_CHEST_ITEM);
+			entries.add(ARMY_WORK_BENCH_ITEM);
+		});
 		AgesOfSiegeMod.LOGGER.info("Registered Ages Of Siege blocks.");
 	}
 
