@@ -1,8 +1,157 @@
 {
-  "parent": "minecraft:block/cube_bottom_top",
+  "parent": "minecraft:block/block",
   "textures": {
-    "top": "minecraft:block/stripped_spruce_log_top",
-    "bottom": "minecraft:block/dark_oak_planks",
-    "side": "minecraft:block/smithing_table_side"
-  }
+    "particle": "ages_of_siege:block/army_work_bench_wood",
+    "wood": "ages_of_siege:block/army_work_bench_wood",
+    "surface": "ages_of_siege:block/army_work_bench_surface",
+    "detail": "ages_of_siege:block/army_work_bench_detail"
+  },
+  "elements": [
+    {
+      "from": [0, 10, 0],
+      "to": [16, 12, 16],
+      "faces": {
+        "down": {"texture": "#wood"},
+        "up": {"texture": "#wood"},
+        "north": {"texture": "#wood"},
+        "south": {"texture": "#wood"},
+        "west": {"texture": "#wood"},
+        "east": {"texture": "#wood"}
+      }
+    },
+    {
+      "from": [1, 0, 1],
+      "to": [3, 10, 3],
+      "faces": {
+        "down": {"texture": "#wood"},
+        "up": {"texture": "#detail"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#detail"},
+        "east": {"texture": "#detail"}
+      }
+    },
+    {
+      "from": [13, 0, 1],
+      "to": [15, 10, 3],
+      "faces": {
+        "down": {"texture": "#wood"},
+        "up": {"texture": "#detail"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#detail"},
+        "east": {"texture": "#detail"}
+      }
+    },
+    {
+      "from": [1, 0, 13],
+      "to": [3, 10, 15],
+      "faces": {
+        "down": {"texture": "#wood"},
+        "up": {"texture": "#detail"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#detail"},
+        "east": {"texture": "#detail"}
+      }
+    },
+    {
+      "from": [13, 0, 13],
+      "to": [15, 10, 15],
+      "faces": {
+        "down": {"texture": "#wood"},
+        "up": {"texture": "#detail"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#detail"},
+        "east": {"texture": "#detail"}
+      }
+    },
+    {
+      "from": [1, 4, 2],
+      "to": [15, 5, 4],
+      "faces": {
+        "down": {"texture": "#wood"},
+        "up": {"texture": "#wood"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#wood"},
+        "east": {"texture": "#wood"}
+      }
+    },
+    {
+      "from": [1, 4, 12],
+      "to": [15, 5, 14],
+      "faces": {
+        "down": {"texture": "#wood"},
+        "up": {"texture": "#wood"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#wood"},
+        "east": {"texture": "#wood"}
+      }
+    },
+    {
+      "from": [3, 12, 3],
+      "to": [12, 13, 13],
+      "faces": {
+        "down": {"texture": "#surface"},
+        "up": {"texture": "#surface"},
+        "north": {"texture": "#surface"},
+        "south": {"texture": "#surface"},
+        "west": {"texture": "#surface"},
+        "east": {"texture": "#surface"}
+      }
+    },
+    {
+      "from": [4, 13, 4],
+      "to": [8, 16, 8],
+      "faces": {
+        "down": {"texture": "#detail"},
+        "up": {"texture": "#detail"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#detail"},
+        "east": {"texture": "#detail"}
+      }
+    },
+    {
+      "from": [9, 12, 8],
+      "to": [13, 15, 12],
+      "faces": {
+        "down": {"texture": "#detail"},
+        "up": {"texture": "#detail"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#detail"},
+        "east": {"texture": "#detail"}
+      }
+    },
+    {
+      "from": [1, 1, 5],
+      "to": [5, 5, 9],
+      "rotation": {"origin": [3, 3, 7], "axis": "x", "angle": 22.5},
+      "faces": {
+        "down": {"texture": "#surface"},
+        "up": {"texture": "#surface"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#surface"},
+        "east": {"texture": "#surface"}
+      }
+    },
+    {
+      "from": [9, 1, 5],
+      "to": [13, 5, 9],
+      "rotation": {"origin": [11, 3, 7], "axis": "x", "angle": -22.5},
+      "faces": {
+        "down": {"texture": "#surface"},
+        "up": {"texture": "#surface"},
+        "north": {"texture": "#detail"},
+        "south": {"texture": "#detail"},
+        "west": {"texture": "#surface"},
+        "east": {"texture": "#surface"}
+      }
+    }
+  ]
 }

@@ -1,5 +1,6 @@
 package com.stamperl.agesofsiege.siege.service;
 
+import com.stamperl.agesofsiege.AgesOfSiegeMod;
 import com.stamperl.agesofsiege.siege.SiegeDirector;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -17,6 +18,8 @@ import net.minecraft.util.math.MathHelper;
 
 public final class ObjectiveService {
 	private static final Identifier BANK_BLOCK_ID = new Identifier("the_age_of_traders", "bank");
+	private static final int BANK_SEARCH_RADIUS = 24;
+	private static final int BANK_VERTICAL_RADIUS = 8;
 	private final SiegeSpawner spawner = new SiegeSpawner();
 
 	public boolean isObjectivePresent(ServerWorld world, SiegeSession session, BlockPos objectivePos) {
@@ -75,6 +78,7 @@ public final class ObjectiveService {
 	}
 
 	public BlockPos trackedBankPos(ServerWorld world, SiegeBaseState state) {
+		adoptTrackedBankIfNeeded(world, state);
 		if (!state.hasTrackedBank()) {
 			return null;
 		}
@@ -83,6 +87,61 @@ public final class ObjectiveService {
 			return null;
 		}
 		return state.getTrackedBankPos();
+	}
+
+	private void adoptTrackedBankIfNeeded(ServerWorld world, SiegeBaseState state) {
+		if (!state.hasBase()) {
+			return;
+		}
+		String worldDimensionId = world.getRegistryKey().getValue().toString();
+		if (!worldDimensionId.equals(state.getDimensionId())) {
+			return;
+		}
+		if (state.hasTrackedBank()) {
+			if (!worldDimensionId.equals(state.getTrackedBankDimensionId())) {
+				return;
+			}
+			if (isBankBlock(world.getBlockState(state.getTrackedBankPos()))) {
+				return;
+			}
+			AgesOfSiegeMod.LOGGER.warn("Tracked guild bank at {} is missing. Clearing stale tracked state.", state.getTrackedBankPos().toShortString());
+			state.clearTrackedBank();
+		}
+
+		BlockPos basePos = state.getBasePos();
+		BlockPos best = null;
+		double bestDistance = Double.MAX_VALUE;
+		int foundBanks = 0;
+		for (int x = -BANK_SEARCH_RADIUS; x <= BANK_SEARCH_RADIUS; x++) {
+			for (int y = -BANK_VERTICAL_RADIUS; y <= BANK_VERTICAL_RADIUS; y++) {
+				for (int z = -BANK_SEARCH_RADIUS; z <= BANK_SEARCH_RADIUS; z++) {
+					BlockPos candidate = basePos.add(x, y, z);
+					if (!isBankBlock(world.getBlockState(candidate))) {
+						continue;
+					}
+					foundBanks++;
+					double distance = candidate.getSquaredDistance(basePos);
+					if (distance < bestDistance) {
+						bestDistance = distance;
+						best = candidate.toImmutable();
+					}
+				}
+			}
+		}
+		if (best == null) {
+			return;
+		}
+		state.setTrackedBank(best, worldDimensionId, state.getBankProtectionCap());
+		if (foundBanks > 1) {
+			AgesOfSiegeMod.LOGGER.warn(
+				"Multiple guild banks found near settlement at {}. Auto-adopted nearest bank at {} and ignored {} duplicates.",
+				basePos.toShortString(),
+				best.toShortString(),
+				foundBanks - 1
+			);
+		} else {
+			AgesOfSiegeMod.LOGGER.info("Auto-adopted existing guild bank at {} for settlement at {}.", best.toShortString(), basePos.toShortString());
+		}
 	}
 
 	public void damageBank(ServerWorld world, SiegeBaseState state, SiegeSession session, int amount) {

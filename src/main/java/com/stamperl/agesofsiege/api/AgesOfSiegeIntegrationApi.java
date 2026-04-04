@@ -1,5 +1,6 @@
 package com.stamperl.agesofsiege.api;
 
+import com.stamperl.agesofsiege.siege.service.ObjectiveService;
 import com.stamperl.agesofsiege.state.SharedTreasuryState;
 import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.loader.api.FabricLoader;
@@ -22,6 +23,7 @@ public final class AgesOfSiegeIntegrationApi {
 	public static final String SET_TREASURY_KEY = "set_treasury";
 	public static final String SET_BANK_POSITION_KEY = "set_bank_position";
 	public static final String CLEAR_BANK_POSITION_KEY = "clear_bank_position";
+	public static final String TRY_TRACK_BANK_KEY = "try_track_bank";
 
 	private AgesOfSiegeIntegrationApi() {
 	}
@@ -36,6 +38,7 @@ public final class AgesOfSiegeIntegrationApi {
 		api.put(SET_TREASURY_KEY, (BiConsumer<MinecraftServer, Long>) AgesOfSiegeIntegrationApi::setTreasuryBalance);
 		api.put(SET_BANK_POSITION_KEY, (BiConsumer<MinecraftServer, NbtCompound>) AgesOfSiegeIntegrationApi::setBankPosition);
 		api.put(CLEAR_BANK_POSITION_KEY, (BiConsumer<MinecraftServer, NbtCompound>) AgesOfSiegeIntegrationApi::clearBankPosition);
+		api.put(TRY_TRACK_BANK_KEY, (BiFunction<MinecraftServer, NbtCompound, Boolean>) AgesOfSiegeIntegrationApi::tryTrackBankPosition);
 		FabricLoader.getInstance().getObjectShare().put(API_KEY, api);
 	}
 
@@ -102,5 +105,35 @@ public final class AgesOfSiegeIntegrationApi {
 			new net.minecraft.util.math.BlockPos(request.getInt("x"), request.getInt("y"), request.getInt("z")),
 			request.getString("dimension")
 		);
+	}
+
+	private static Boolean tryTrackBankPosition(MinecraftServer server, NbtCompound request) {
+		if (request == null) {
+			return Boolean.FALSE;
+		}
+		SiegeBaseState state = SiegeBaseState.get(server);
+		net.minecraft.util.math.BlockPos requestedPos = new net.minecraft.util.math.BlockPos(
+			request.getInt("x"),
+			request.getInt("y"),
+			request.getInt("z")
+		);
+		String dimensionId = request.getString("dimension");
+		int protectionCap = request.contains("protectionCap") ? request.getInt("protectionCap") : 100;
+		if (!state.hasTrackedBank()) {
+			state.setTrackedBank(requestedPos, dimensionId, protectionCap);
+			return Boolean.TRUE;
+		}
+		if (state.isTrackedBankAt(requestedPos, dimensionId)) {
+			return Boolean.TRUE;
+		}
+		net.minecraft.util.Identifier trackedDimension = net.minecraft.util.Identifier.tryParse(state.getTrackedBankDimensionId());
+		net.minecraft.server.world.ServerWorld trackedWorld = trackedDimension == null ? null : server.getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, trackedDimension));
+		ObjectiveService objectiveService = new ObjectiveService();
+		if (trackedWorld == null || !objectiveService.isTrackedBankPresent(trackedWorld, state)) {
+			state.clearTrackedBank();
+			state.setTrackedBank(requestedPos, dimensionId, protectionCap);
+			return Boolean.TRUE;
+		}
+		return Boolean.FALSE;
 	}
 }
