@@ -27,6 +27,7 @@ public final class ModBlocks {
 		"army_work_bench",
 		new ArmyWorkBenchBlock(AbstractBlock.Settings.create()
 			.mapColor(MapColor.BROWN)
+			.nonOpaque()
 			.strength(3.0F)
 			.sounds(BlockSoundGroup.WOOD))
 	);

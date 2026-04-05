@@ -21,17 +21,51 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.util.shape.VoxelShapes;
+import net.minecraft.world.BlockView;
 import net.minecraft.world.World;
+import net.minecraft.block.ShapeContext;
 
 public final class ArmyWorkBenchBlock extends BlockWithEntity implements BlockEntityProvider {
 	public static final DirectionProperty FACING = Properties.HORIZONTAL_FACING;
 	public static final EnumProperty<ArmyWorkBenchPart> PART = EnumProperty.of("part", ArmyWorkBenchPart.class);
+	private static final VoxelShape BENCH_SHAPE = VoxelShapes.union(
+		Block.createCuboidShape(0.0D, 10.0D, 0.0D, 16.0D, 12.0D, 16.0D),
+		Block.createCuboidShape(1.0D, 0.0D, 1.0D, 3.0D, 10.0D, 3.0D),
+		Block.createCuboidShape(13.0D, 0.0D, 1.0D, 15.0D, 10.0D, 3.0D),
+		Block.createCuboidShape(1.0D, 0.0D, 13.0D, 3.0D, 10.0D, 15.0D),
+		Block.createCuboidShape(13.0D, 0.0D, 13.0D, 15.0D, 10.0D, 15.0D),
+		Block.createCuboidShape(1.0D, 4.0D, 2.0D, 15.0D, 5.0D, 4.0D),
+		Block.createCuboidShape(1.0D, 4.0D, 12.0D, 15.0D, 5.0D, 14.0D),
+		Block.createCuboidShape(1.0D, 1.0D, 1.0D, 15.0D, 16.0D, 15.0D)
+	);
 
 	public ArmyWorkBenchBlock(Settings settings) {
 		super(settings);
 		this.setDefaultState(this.stateManager.getDefaultState()
 			.with(FACING, Direction.NORTH)
 			.with(PART, ArmyWorkBenchPart.MAIN));
+	}
+
+	@Override
+	public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext context) {
+		return BENCH_SHAPE;
+	}
+
+	@Override
+	public VoxelShape getCollisionShape(BlockState state, BlockView world, BlockPos pos, ShapeContext context) {
+		return BENCH_SHAPE;
+	}
+
+	@Override
+	public VoxelShape getCullingShape(BlockState state, BlockView world, BlockPos pos) {
+		return VoxelShapes.empty();
+	}
+
+	@Override
+	public boolean isTransparent(BlockState state, BlockView world, BlockPos pos) {
+		return true;
 	}
 
 	@Override

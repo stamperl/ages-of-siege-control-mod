@@ -6,6 +6,7 @@ import com.stamperl.agesofsiege.state.SiegeBaseState;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.util.math.BlockPos;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -15,6 +16,8 @@ import java.util.function.Function;
 
 public final class AgesOfSiegeIntegrationApi {
 	public static final String API_KEY = "ages_of_siege:integration_api";
+	public static final String BRIDGE_KEY = "ages_of_siege:integration_bridge";
+	public static final int API_VERSION = 1;
 	public static final String AGE_SNAPSHOT_KEY = "age_snapshot";
 	public static final String TREASURY_SNAPSHOT_KEY = "treasury_snapshot";
 	public static final String DEPOSIT_COIN_KEY = "deposit_coin";
@@ -29,6 +32,7 @@ public final class AgesOfSiegeIntegrationApi {
 	}
 
 	public static void register() {
+		AgesOfSiegeIntegrationBridge bridge = new AgesOfSiegeIntegrationBridge();
 		Map<String, Object> api = new HashMap<>();
 		api.put(AGE_SNAPSHOT_KEY, (Function<MinecraftServer, NbtCompound>) AgesOfSiegeIntegrationApi::ageSnapshot);
 		api.put(TREASURY_SNAPSHOT_KEY, (Function<MinecraftServer, NbtCompound>) AgesOfSiegeIntegrationApi::treasurySnapshot);
@@ -40,6 +44,7 @@ public final class AgesOfSiegeIntegrationApi {
 		api.put(CLEAR_BANK_POSITION_KEY, (BiConsumer<MinecraftServer, NbtCompound>) AgesOfSiegeIntegrationApi::clearBankPosition);
 		api.put(TRY_TRACK_BANK_KEY, (BiFunction<MinecraftServer, NbtCompound, Boolean>) AgesOfSiegeIntegrationApi::tryTrackBankPosition);
 		FabricLoader.getInstance().getObjectShare().put(API_KEY, api);
+		FabricLoader.getInstance().getObjectShare().put(BRIDGE_KEY, bridge);
 	}
 
 	private static NbtCompound ageSnapshot(MinecraftServer server) {
@@ -59,39 +64,42 @@ public final class AgesOfSiegeIntegrationApi {
 		if (request == null) {
 			return;
 		}
-		String coinKey = request.getString("coinKey");
-		int coinValue = request.getInt("coinValue");
-		int count = request.getInt("count");
-		SharedTreasuryState.get(server).depositCoins(coinKey, coinValue, count);
+		new AgesOfSiegeIntegrationBridge().depositCoin(
+			server,
+			request.getString("coinKey"),
+			request.getInt("coinValue"),
+			request.getInt("count")
+		);
 	}
 
 	private static void creditTreasury(MinecraftServer server, Long amount) {
 		if (amount == null) {
 			return;
 		}
-		SharedTreasuryState.get(server).credit(amount);
+		new AgesOfSiegeIntegrationBridge().creditTreasury(server, amount);
 	}
 
 	private static Boolean spendTreasury(MinecraftServer server, Long amount) {
 		if (amount == null) {
 			return Boolean.FALSE;
 		}
-		return SharedTreasuryState.get(server).spend(amount);
+		return new AgesOfSiegeIntegrationBridge().spendTreasury(server, amount);
 	}
 
 	private static void setTreasuryBalance(MinecraftServer server, Long amount) {
 		if (amount == null) {
 			return;
 		}
-		SharedTreasuryState.get(server).setBalance(amount);
+		new AgesOfSiegeIntegrationBridge().setTreasuryBalance(server, amount);
 	}
 
 	private static void setBankPosition(MinecraftServer server, NbtCompound request) {
 		if (request == null) {
 			return;
 		}
-		SiegeBaseState.get(server).setTrackedBank(
-			new net.minecraft.util.math.BlockPos(request.getInt("x"), request.getInt("y"), request.getInt("z")),
+		new AgesOfSiegeIntegrationBridge().setTrackedBank(
+			server,
+			new BlockPos(request.getInt("x"), request.getInt("y"), request.getInt("z")),
 			request.getString("dimension"),
 			request.contains("protectionCap") ? request.getInt("protectionCap") : 100
 		);
@@ -101,8 +109,9 @@ public final class AgesOfSiegeIntegrationApi {
 		if (request == null) {
 			return;
 		}
-		SiegeBaseState.get(server).clearTrackedBankIfMatches(
-			new net.minecraft.util.math.BlockPos(request.getInt("x"), request.getInt("y"), request.getInt("z")),
+		new AgesOfSiegeIntegrationBridge().clearTrackedBank(
+			server,
+			new BlockPos(request.getInt("x"), request.getInt("y"), request.getInt("z")),
 			request.getString("dimension")
 		);
 	}
@@ -111,29 +120,11 @@ public final class AgesOfSiegeIntegrationApi {
 		if (request == null) {
 			return Boolean.FALSE;
 		}
-		SiegeBaseState state = SiegeBaseState.get(server);
-		net.minecraft.util.math.BlockPos requestedPos = new net.minecraft.util.math.BlockPos(
-			request.getInt("x"),
-			request.getInt("y"),
-			request.getInt("z")
+		return new AgesOfSiegeIntegrationBridge().tryTrackBank(
+			server,
+			new BlockPos(request.getInt("x"), request.getInt("y"), request.getInt("z")),
+			request.getString("dimension"),
+			request.contains("protectionCap") ? request.getInt("protectionCap") : 100
 		);
-		String dimensionId = request.getString("dimension");
-		int protectionCap = request.contains("protectionCap") ? request.getInt("protectionCap") : 100;
-		if (!state.hasTrackedBank()) {
-			state.setTrackedBank(requestedPos, dimensionId, protectionCap);
-			return Boolean.TRUE;
-		}
-		if (state.isTrackedBankAt(requestedPos, dimensionId)) {
-			return Boolean.TRUE;
-		}
-		net.minecraft.util.Identifier trackedDimension = net.minecraft.util.Identifier.tryParse(state.getTrackedBankDimensionId());
-		net.minecraft.server.world.ServerWorld trackedWorld = trackedDimension == null ? null : server.getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, trackedDimension));
-		ObjectiveService objectiveService = new ObjectiveService();
-		if (trackedWorld == null || !objectiveService.isTrackedBankPresent(trackedWorld, state)) {
-			state.clearTrackedBank();
-			state.setTrackedBank(requestedPos, dimensionId, protectionCap);
-			return Boolean.TRUE;
-		}
-		return Boolean.FALSE;
 	}
 }

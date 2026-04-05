@@ -35,6 +35,10 @@ public class SharedTreasuryState extends PersistentState {
 		return balance;
 	}
 
+	public Map<String, Long> getDepositedCoins() {
+		return Map.copyOf(depositedCoins);
+	}
+
 	public void depositCoins(String coinKey, int coinValue, int count) {
 		if (coinKey == null || coinKey.isBlank() || coinValue <= 0 || count <= 0) {
 			return;
